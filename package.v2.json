@@ -77,7 +77,7 @@
     "name": "影巢签到AI版",
     "description": "自动完成影巢每日签到，支持失败重试和历史记录",
     "labels": "签到,影巢",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "icon": "https://raw.githubusercontent.com/madrays/MoviePilot-Plugins/main/icons/hdhive.ico",
     "author": "madrays",
     "level": 1,
