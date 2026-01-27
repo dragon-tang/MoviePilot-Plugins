@@ -76,9 +76,9 @@ class HdhiveSign(_PluginBase):
 
     # 影巢站点配置（域名可配置）
     _base_url = "https://hdhive.com"
-    _site_url = f"{_base_url}/"
-    _signin_api = f"{self._base_url}/api/customer/user/checkin"
-    _user_info_api = f"{self._base_url}/api/customer/user/info"
+    _site_url = None  # 将在init_plugin中初始化
+    _signin_api = None  # 将在init_plugin中初始化
+    _user_info_api = None  # 将在init_plugin中初始化
     _login_api_candidates = [
         "/api/customer/user/login",
         "/api/customer/auth/login",
