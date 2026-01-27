@@ -11,7 +11,7 @@
 - 默认使用代理访问
 
 修改记录:
-- v2.0.0: AI添加多账户支持，每个账户独立配置和记录
+- v2.0.0: 添加多账户支持，每个账户独立配置和记录
 - v1.3.0: 域名改为可配置，统一API拼接(Referer/Origin/接口)，精简日志
 - v1.2.0: 增加自动登录功能
 - v1.1.0: 修复签到历史显示和通知格式
@@ -40,7 +40,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class HdhiveSign(_PluginBase):
     # 插件名称
-    plugin_name = "影巢签到AI版"
+    plugin_name = "影巢签到"
     # 插件描述
     plugin_desc = "自动完成影巢(HDHive)每日签到，支持多账户和失败重试"
     # 插件图标
@@ -74,14 +74,24 @@ class HdhiveSign(_PluginBase):
     
     # 影巢站点配置（域名可配置）
     _base_url = "https://hdhive.com"
-    _site_url = f"{_base_url}/"
-    _signin_api = f"{_base_url}/api/customer/user/checkin"
-    _user_info_api = f"{self._base_url}/api/customer/user/info"
+    _site_url = None
+    _signin_api = None
+    _user_info_api = None
     _login_api_candidates = [
         "/api/customer/user/login",
         "/api/customer/auth/login",
     ]
     _login_page = "/login"
+
+    def __init__(self):
+        # 初始化时构建URL
+        self._update_urls()
+
+    def _update_urls(self):
+        """更新URL地址"""
+        self._site_url = f"{self._base_url}/"
+        self._signin_api = f"{self._base_url}/api/customer/user/checkin"
+        self._user_info_api = f"{self._base_url}/api/customer/user/info"
 
     def init_plugin(self, config: dict = None):
         # 停止现有任务
@@ -98,9 +108,7 @@ class HdhiveSign(_PluginBase):
                 # 新增：站点地址配置
                 self._base_url = (config.get("base_url") or self._base_url or "").rstrip("/") or "https://hdhive.com"
                 # 基于 base_url 统一构建接口地址
-                self._site_url = f"{self._base_url}/"
-                self._signin_api = f"{self._base_url}/api/customer/user/checkin"
-                self._user_info_api = f"{self._base_url}/api/customer/user/info"
+                self._update_urls()
                 self._max_retries = int(config.get("max_retries", 3))
                 self._retry_interval = int(config.get("retry_interval", 30))
                 self._history_days = int(config.get("history_days", 30))
@@ -151,7 +159,7 @@ class HdhiveSign(_PluginBase):
             if not line:
                 continue
                 
-            # 解析格式：cookie|username|password|alias
+            # 解析格式：cookie|用户名|密码|别名
             parts = line.split('|')
             if len(parts) >= 3:
                 cookie = parts[0].strip()
@@ -565,7 +573,7 @@ class HdhiveSign(_PluginBase):
 
             # 确保日期格式正确
             if "date" not in sign_data:
-                sign_data["date"] = datetime.today().strftime('%Y-%m-%d %H:%M:%S')
+                sign_data["date"] = datetime.today().strftime('%Y-%m-d %H:%M:%S')
 
             history.append(sign_data)
 
