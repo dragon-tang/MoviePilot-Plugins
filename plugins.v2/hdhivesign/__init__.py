@@ -1,9 +1,9 @@
+import json
 import requests
 from datetime import datetime
 from typing import Any, List, Dict, Tuple, Optional
 
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.plugins import _PluginBase
 from app.core.config import settings
@@ -15,30 +15,26 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class HdhiveSign(_PluginBase):
-    # ===== 插件基础信息 =====
+    # ===== 插件信息 =====
     plugin_name = "影巢签到"
     plugin_desc = "影巢(HDHive)多账号自动签到"
-    plugin_version = "2.0.1"
+    plugin_version = "2.1.0"
     plugin_author = "madrays"
     plugin_config_prefix = "hdhivesign_"
     plugin_order = 1
     auth_level = 2
 
-    # ===== 运行配置 =====
+    # ===== 配置 =====
     _enabled = False
     _notify = True
     _cron = None
-    _accounts: List[Dict[str, str]] = []
     _base_url = "https://hdhive.com"
-
-    _scheduler: Optional[BackgroundScheduler] = None
+    _accounts: List[Dict[str, str]] = []
 
     # =========================
     # 插件初始化
     # =========================
     def init_plugin(self, config: dict = None):
-        self.stop_service()
-
         if not config:
             return
 
@@ -47,7 +43,20 @@ class HdhiveSign(_PluginBase):
         self._cron = config.get("cron")
         self._base_url = (config.get("base_url") or self._base_url).rstrip("/")
 
-        self._accounts = config.get("accounts") or []
+        accounts = config.get("accounts") or []
+
+        # Textarea 会传字符串，需解析
+        if isinstance(accounts, str):
+            try:
+                accounts = json.loads(accounts)
+            except Exception as e:
+                logger.error("影巢签到：账号 JSON 解析失败")
+                accounts = []
+
+        if not isinstance(accounts, list):
+            accounts = []
+
+        self._accounts = accounts
 
     # =========================
     # 插件状态（必须）
@@ -78,7 +87,7 @@ class HdhiveSign(_PluginBase):
             try:
                 self._sign_single(account, idx)
             except Exception as e:
-                logger.error(f"账号签到异常: {e}", exc_info=True)
+                logger.error(f"影巢签到异常: {e}", exc_info=True)
 
     def _sign_single(self, account: dict, idx: int):
         name = account.get("name") or f"账号{idx}"
@@ -92,7 +101,7 @@ class HdhiveSign(_PluginBase):
         token = cookies.get("token")
 
         if not token:
-            self._notify_msg(name, "❌ Cookie 缺少 token")
+            self._notify_msg(name, "❌ Cookie 中缺少 token")
             return
 
         headers = {
@@ -120,16 +129,16 @@ class HdhiveSign(_PluginBase):
         msg = data.get("message", "未知返回")
         success = data.get("success") or "已签到" in msg
 
-        status = "签到成功" if success else "签到失败"
+        status = "✅ 签到成功" if success else "❌ 签到失败"
 
         self._save_history(name, status, msg)
-        self._notify_msg(name, f"{status}：{msg}")
+        self._notify_msg(name, f"{status}\n{msg}")
 
     # =========================
     # 历史记录
     # =========================
     def _save_history(self, name: str, status: str, msg: str):
-        key = f"history_{name}"
+        key = f"hdhive_history_{name}"
         history = self.get_data(key) or []
 
         history.append({
@@ -162,7 +171,7 @@ class HdhiveSign(_PluginBase):
         )
 
     # =========================
-    # 插件配置 UI（必须）
+    # 插件配置页（必须）
     # =========================
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         return [
@@ -194,18 +203,27 @@ class HdhiveSign(_PluginBase):
                         "props": {
                             "type": "info",
                             "variant": "tonal",
-                            "text": "多账号配置（每行一个账号）"
+                            "text": (
+                                "多账号配置（JSON 格式）示例：\n\n"
+                                "[\n"
+                                "  {\n"
+                                "    \"name\": \"主账号\",\n"
+                                "    \"cookie\": \"token=xxx; csrf_access_token=yyy\"\n"
+                                "  },\n"
+                                "  {\n"
+                                "    \"name\": \"小号\",\n"
+                                "    \"cookie\": \"token=aaa; csrf_access_token=bbb\"\n"
+                                "  }\n"
+                                "]"
+                            )
                         }
                     },
                     {
-                        "component": "VDataTable",
+                        "component": "VTextarea",
                         "props": {
                             "model": "accounts",
-                            "headers": [
-                                {"title": "账号名称", "key": "name"},
-                                {"title": "Cookie", "key": "cookie"}
-                            ],
-                            "items-per-page": -1
+                            "label": "账号配置（JSON）",
+                            "rows": 10
                         }
                     }
                 ]
@@ -215,19 +233,23 @@ class HdhiveSign(_PluginBase):
             "notify": True,
             "cron": "0 8 * * *",
             "base_url": "https://hdhive.com",
-            "accounts": [
-                {"name": "主账号", "cookie": ""}
-            ]
+            "accounts": json.dumps(
+                [
+                    {"name": "主账号", "cookie": ""}
+                ],
+                ensure_ascii=False,
+                indent=2
+            )
         }
 
     # =========================
-    # 插件详情页（必须）
+    # 插件页面（必须）
     # =========================
     def get_page(self) -> List[dict]:
         pages = []
         for account in self._accounts:
             name = account.get("name")
-            history = self.get_data(f"history_{name}") or []
+            history = self.get_data(f"hdhive_history_{name}") or []
 
             pages.append({
                 "component": "VCard",
@@ -235,34 +257,14 @@ class HdhiveSign(_PluginBase):
                     {"component": "VCardTitle", "text": f"📌 {name}"},
                     {
                         "component": "VCardText",
-                        "content": [
-                            {
-                                "component": "VAlert",
-                                "props": {
-                                    "type": "info",
-                                    "variant": "tonal",
-                                    "text": f"历史记录：{len(history)} 条"
-                                }
-                            }
-                        ]
+                        "text": f"历史签到记录：{len(history)} 条"
                     }
                 ]
             })
         return pages
 
     # =========================
-    # API（必须，可空）
+    # API（必须）
     # =========================
     def get_api(self) -> List[Dict[str, Any]]:
         return []
-
-    # =========================
-    # 停止服务
-    # =========================
-    def stop_service(self):
-        try:
-            if self._scheduler:
-                self._scheduler.shutdown()
-                self._scheduler = None
-        except Exception:
-            pass
