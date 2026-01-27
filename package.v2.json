@@ -79,7 +79,7 @@
     "labels": "签到,影巢",
     "version": "2.0.0",
     "icon": "https://raw.githubusercontent.com/madrays/MoviePilot-Plugins/main/icons/hdhive.ico",
-    "author": "madrays",
+    "author": "madrays + ChatGPT",
     "level": 1,
     "v2": true,
     "history": {
