@@ -41,7 +41,7 @@ class mediaservermsgai(_PluginBase):
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "1.9.3"
+    plugin_version = "1.9.4"
     plugin_author = "jxxghp"
     author_url = "https://github.com/jxxghp"
     plugin_config_prefix = "mediaservermsgai_"
@@ -590,13 +590,24 @@ class mediaservermsgai(_PluginBase):
 
             # 2. 元数据识别
             logger.info("开始元数据识别")
+            # 检查路径是否命中黑名单（用于后续跳过TMDB图片）
+            _raw_path = event_info.item_path or ""
+            if not _raw_path and event_info.json_object:
+                _raw_path = event_info.json_object.get('Item', {}).get('Path', '')
+            _path_blocked = any(kw in _raw_path for kw in self._path_skip_keywords) if (self._path_skip_keywords and _raw_path) else False
+
             tmdb_id = self._extract_tmdb_id(event_info)
             event_info.tmdb_id = tmdb_id
             logger.debug(f"TMDB ID: {tmdb_id}")
-            
+
             message_texts = []
             message_title = ""
-            image_url = event_info.image_url
+            # 路径被拦截时不使用 event_info.image_url（可能来自错误刮削），改从 Emby 本地构造
+            if _path_blocked:
+                image_url = self._get_emby_local_image(event_info)
+                logger.info(f"路径已拦截，使用Emby本地图片: {image_url}")
+            else:
+                image_url = event_info.image_url
             
             # 3. 音频单曲特殊处理
             if event_info.item_type == "AUD":
@@ -708,13 +719,13 @@ class mediaservermsgai(_PluginBase):
                     logger.debug("播放事件，不显示简介")
 
                 # 图片
-                if not image_url:
+                if not image_url and not _path_blocked:
                     logger.debug("尝试获取TMDB图片")
                     if event_info.item_type in ["TV", "SHOW"] and tmdb_id:
                         image_url = self._get_tmdb_image(event_info, MediaType.TV)
                     elif event_info.item_type == "MOV" and tmdb_id:
                         image_url = self._get_tmdb_image(event_info, MediaType.MOVIE)
-                    
+
                     if image_url:
                         logger.debug(f"获取到TMDB图片: {image_url[:50]}...")
                     else:
@@ -998,6 +1009,8 @@ class mediaservermsgai(_PluginBase):
 
         # 路径关键词黑名单检查：命中则跳过TMDB识别
         item_path = event_info.item_path or ""
+        if not item_path and event_info.json_object:
+            item_path = event_info.json_object.get('Item', {}).get('Path', '')
         if self._path_skip_keywords and item_path:
             for kw in self._path_skip_keywords:
                 if kw in item_path:
@@ -1068,6 +1081,33 @@ class mediaservermsgai(_PluginBase):
             logger.debug(f"标准化服务器名: {server_name}")
         
         return server_name
+
+    def _get_emby_local_image(self, event_info: WebhookEventInfo) -> Optional[str]:
+        """从Emby本地构造图片URL（不经过TMDB），使用webhook中的ImageTags"""
+        try:
+            if not event_info.json_object:
+                return None
+            item_data = event_info.json_object.get('Item', {})
+            item_id = item_data.get('Id')
+            image_tags = item_data.get('ImageTags', {})
+            # 优先 Primary，其次 Thumb
+            tag = image_tags.get('Primary') or image_tags.get('Thumb')
+            image_type = 'Primary' if image_tags.get('Primary') else 'Thumb'
+            if not item_id or not tag:
+                return None
+            service = self.service_info(event_info.server_name)
+            if not service:
+                return None
+            host = service.config.config.get('host', '')
+            apikey = service.config.config.get('apikey', '')
+            if not host or not apikey:
+                return None
+            url = f"{host}/emby/Items/{item_id}/Images/{image_type}?maxHeight=450&maxWidth=450&tag={tag}&quality=90&api_key={apikey}"
+            logger.debug(f"构造Emby本地图片URL: {url[:80]}...")
+            return url
+        except Exception as e:
+            logger.debug(f"构造Emby本地图片URL异常: {str(e)}")
+            return None
 
     def _get_audio_image_url(self, server_name: str, item_data: dict) -> Optional[str]:
         """获取音频图片URL"""
