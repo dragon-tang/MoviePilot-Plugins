@@ -41,7 +41,7 @@ class mediaservermsgai(_PluginBase):
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "1.9.5"
+    plugin_version = "1.9.6"
     plugin_author = "jxxghp"
     author_url = "https://github.com/jxxghp"
     plugin_config_prefix = "mediaservermsgai_"
@@ -60,6 +60,7 @@ class mediaservermsgai(_PluginBase):
     _overview_max_length = DEFAULT_OVERVIEW_MAX_LENGTH  # 简介最大长度
     _filter_unrecognized = True                # TMDB未识别视频不发送通知
     _path_skip_keywords = []                   # 路径关键词黑名单（命中则跳过TMDB识别）
+    _emby_image_host = ""                      # 自定义Emby图片Host（用于拦截路径的本地图片）
 
     # ==================== TV剧集消息聚合配置 ====================
     _aggregate_enabled = False                 # 是否启用TV剧集聚合功能
@@ -139,6 +140,7 @@ class mediaservermsgai(_PluginBase):
             self._path_skip_keywords = [
                 kw.strip() for kw in path_skip_keywords_raw.splitlines() if kw.strip()
             ]
+            self._emby_image_host = config.get("emby_image_host", "").rstrip("/")
             
             logger.info("插件配置初始化完成:")
             logger.info(f"  - 启用状态: {self._enabled}")
@@ -302,6 +304,12 @@ class mediaservermsgai(_PluginBase):
                         'content': [
                             {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VTextarea', 'props': {'model': 'path_skip_keywords', 'label': '路径关键词黑名单（跳过TMDB识别）', 'placeholder': '每行一个关键词，Path包含任意关键词时跳过TMDB识别\n例如：\n日本有码\n日本无码', 'rows': 4, 'hint': '命中关键词的媒体不会进行TMDB识别，若同时开启「未识别过滤」则也不会发送通知'}}]}
                         ]
+                    },
+                    {
+                        'component': 'VRow',
+                        'content': [
+                            {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VTextField', 'props': {'model': 'emby_image_host', 'label': '自定义Emby图片Host', 'placeholder': '例如：http://47.112.185.200:8099', 'hint': '拦截路径的媒体图片将使用此Host构造URL，留空则使用插件内配置的Emby地址'}}]}
+                        ]
                     }
                 ]
             }
@@ -312,7 +320,8 @@ class mediaservermsgai(_PluginBase):
             "aggregate_time": self.DEFAULT_AGGREGATE_TIME,
             "smart_category_enabled": True,
             "filter_unrecognized": True,
-            "path_skip_keywords": ""
+            "path_skip_keywords": "",
+            "emby_image_host": ""
         }
     
     def get_page(self) -> List[dict]:
@@ -1094,15 +1103,15 @@ class mediaservermsgai(_PluginBase):
             service = self.service_info(event_info.server_name)
             if not service:
                 return None
-            host = service.config.config.get('host', '')
-            apikey = service.config.config.get('apikey', '')
-            if not host or not apikey:
+            # 优先使用自定义图片Host，否则使用插件配置的Emby地址
+            host = (self._emby_image_host or service.config.config.get('host', '')).rstrip('/')
+            if not host:
                 return None
             # 优先 Backdrop（横幅大图）
             backdrop_tags = item_data.get('BackdropImageTags', [])
             if backdrop_tags:
                 tag = backdrop_tags[0]
-                url = f"{host}/emby/Items/{item_id}/Images/Backdrop/0?tag={tag}&maxWidth=1920&quality=70&api_key={apikey}"
+                url = f"{host}/emby/Items/{item_id}/Images/Backdrop/0?tag={tag}&maxWidth=1920&quality=70"
                 logger.debug(f"构造Emby Backdrop图片URL: {url[:80]}...")
                 return url
             # 回退 Primary
@@ -1111,7 +1120,7 @@ class mediaservermsgai(_PluginBase):
             image_type = 'Primary' if image_tags.get('Primary') else 'Thumb'
             if not tag:
                 return None
-            url = f"{host}/emby/Items/{item_id}/Images/{image_type}?maxHeight=450&maxWidth=450&tag={tag}&quality=90&api_key={apikey}"
+            url = f"{host}/emby/Items/{item_id}/Images/{image_type}?maxHeight=450&maxWidth=450&tag={tag}&quality=90"
             logger.debug(f"构造Emby Primary图片URL: {url[:80]}...")
             return url
         except Exception as e:
