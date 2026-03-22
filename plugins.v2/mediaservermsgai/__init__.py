@@ -20,7 +20,7 @@ from app.utils.web import WebUtils
 
 class mediaservermsgai(_PluginBase):
     """
-    媒体服务器通知插件 AI增强版 (1.9.8 深度拦截版)
+    媒体服务器通知插件 AI增强版 (1.9.9 终极拦截版)
     """
 
     # ==================== 常量定义 ====================
@@ -31,9 +31,9 @@ class mediaservermsgai(_PluginBase):
 
     # ==================== 插件基本信息 ====================
     plugin_name = "媒体库服务器通知AI版"
-    plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+强力排除过滤)"
+    plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(支持排除库模糊匹配及物理拦截识别)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "1.9.8"
+    plugin_version = "1.9.9"
     plugin_author = "jxxghp"
     author_url = "https://github.com/jxxghp"
     plugin_config_prefix = "mediaservermsgai_"
@@ -76,7 +76,8 @@ class mediaservermsgai(_PluginBase):
 
     _country_cn_map = {
         'CN': '中国大陆', 'US': '美国', 'JP': '日本', 'KR': '韩国', 'HK': '中国香港', 'TW': '中国台湾', 
-        'GB': '英国', 'FR': '法国', 'DE': '德国', 'IT': '意大利', 'ES': '西班牙', 'IN': '印度'
+        'GB': '英国', 'FR': '法国', 'DE': '德国', 'IT': '意大利', 'ES': '西班牙', 'IN': '印度',
+        'TH': '泰国', 'RU': '俄罗斯', 'CA': '加拿大', 'AU': '澳大利亚', 'SG': '新加坡', 'MY': '马来西亚'
     }
 
     def __init__(self):
@@ -96,21 +97,22 @@ class mediaservermsgai(_PluginBase):
             self._filter_unrecognized = config.get("filter_unrecognized", True)
             
             exclude_str = config.get("exclude_libs") or ""
-            # 处理中英文逗号并去空格
+            # 分隔并清理
             self._exclude_libs = [s.strip() for s in re.split(r'[，,]', exclude_str) if s.strip()]
-            logger.info(f"【AI通知插件】初始化完成。当前排除库列表: {self._exclude_libs}")
+            logger.info(f"【AI通知插件】加载成功。拦截库关键词: {self._exclude_libs}")
 
+    # ==================== 必须实现的抽象方法 ====================
     def get_state(self) -> bool: return self._enabled
     def get_api(self) -> List[Dict[str, Any]]: return []
     def get_page(self) -> List[dict]: return []
     def get_command(self) -> List[Dict[str, Any]]: return []
 
     def _get_library_name(self, event_info: WebhookEventInfo) -> str:
-        """精准提取库名"""
+        """精准提取媒体服务器库名"""
         if not event_info or not event_info.json_object: return ""
-        # Emby / Jellyfin
+        # Emby / Jellyfin 逻辑
         lib_name = event_info.json_object.get('Item', {}).get('LibraryName')
-        # Plex
+        # Plex 逻辑
         if not lib_name:
             lib_name = event_info.json_object.get('Metadata', {}).get('librarySectionTitle')
         return str(lib_name).strip() if lib_name else ""
@@ -125,6 +127,7 @@ class mediaservermsgai(_PluginBase):
             {"title": "登录提醒", "value": "user.authenticated|user.authenticationfailed"},
             {"title": "系统测试", "value": "system.webhooktest|system.notificationtest"},
         ]
+        # 兼容性获取服务器列表
         try:
             ms_items = [{"title": c.name, "value": c.name} for c in MediaServerHelper().get_configs().values()]
         except: ms_items = []
@@ -158,17 +161,18 @@ class mediaservermsgai(_PluginBase):
             event_info: WebhookEventInfo = event.event_data
             if not event_info: return
             
-            # --- 深度拦截开始 ---
+            # --- 拦截逻辑：库名匹配 ---
             curr_lib = self._get_library_name(event_info)
-            # 在日志中明确打印库名，方便你核对
             if curr_lib:
-                logger.info(f"【AI通知】收到来自库【{curr_lib}】的消息事件")
+                logger.info(f"*** 【AI通知】当前媒体库名称为: \"{curr_lib}\" ***")
             
-            is_excluded = curr_lib in self._exclude_libs
+            # 使用模糊匹配，防止末尾空格等问题
+            is_excluded = any(ex in curr_lib for ex in self._exclude_libs) if curr_lib else False
+
             if is_excluded:
-                logger.info(f"【AI通知】库【{curr_lib}】命中排除名单，已强制抹除识别 ID。")
-                event_info.tmdb_id = None # 物理抹除已经存在的 ID
-            # --- 深度拦截结束 ---
+                logger.info(f"命中排除库拦截，物理抹除 TMDB ID。")
+                event_info.tmdb_id = None # 物理强制抹除
+            # --- 拦截结束 ---
 
             if not self._webhook_actions.get(event_info.event): return
             allowed_types = set()
@@ -178,12 +182,9 @@ class mediaservermsgai(_PluginBase):
             
             event_type = str(event_info.event).lower()
 
-            # 过滤逻辑 (排除库不参与“未识别过滤”，因为它们本来就不需要识别)
             if self._filter_unrecognized and not is_excluded:
                 if event_info.item_type in ["MOV", "TV", "SHOW"]:
-                    # 注意：如果是排除库，is_excluded 为 True，这里就不会进，也就不会调用 _extract_tmdb_id
-                    tid = self._extract_tmdb_id(event_info)
-                    if not tid: return
+                    if not self._extract_tmdb_id(event_info): return
 
             if "test" in event_type: self._handle_test_event(event_info); return
             if "user.authentic" in event_type: self._handle_login_event(event_info); return
@@ -211,14 +212,14 @@ class mediaservermsgai(_PluginBase):
                 if last_event and (current_time - last_time < 2) and last_event.event_id == event.event_id: return
                 self._last_event_cache = (event, current_time)
 
-            # 再次确认排除状态
+            # 拦截判定
             curr_lib = self._get_library_name(event_info)
-            if curr_lib in self._exclude_libs:
-                tmdb_id = None
-            else:
-                tmdb_id = self._extract_tmdb_id(event_info)
+            is_excluded = any(ex in curr_lib for ex in self._exclude_libs) if curr_lib else False
             
+            # 如果是排除库，强行令 tmdb_id 为 None
+            tmdb_id = None if is_excluded else self._extract_tmdb_id(event_info)
             event_info.tmdb_id = tmdb_id
+            
             message_texts = []
             image_url = event_info.image_url
             
@@ -259,7 +260,7 @@ class mediaservermsgai(_PluginBase):
             self.post_message(mtype=NotificationType.MediaServer, title=message_title, text="\n".join(message_texts), image=image_url or self._webhook_images.get(event_info.channel), link=self._get_play_link(event_info))
         except: logger.error(traceback.format_exc())
 
-    # ==================== 辅助函数全量保留 ====================
+    # ==================== 所有原始 1.9.2 辅助函数 ====================
     def _handle_test_event(self, event_info):
         self.post_message(mtype=NotificationType.MediaServer, title="🔔 测试", text="连接正常", image=self._webhook_images.get(event_info.channel))
 
@@ -274,9 +275,9 @@ class mediaservermsgai(_PluginBase):
         texts.append(f"👤 歌手：{(item.get('Artists') or ['未知歌手'])[0]}")
         texts.append(f"⏱️ 时长：{self._format_ticks(item.get('RunTimeTicks', 0))}")
 
-    def _get_series_id(self, event_info):
+    def _get_series_id(self, event_info: WebhookEventInfo):
         if event_info.json_object: return event_info.json_object.get("Item", {}).get("SeriesId") or event_info.json_object.get("Item", {}).get("SeriesName")
-        return None
+        return getattr(event_info, "series_id", None)
 
     def _aggregate_tv_episodes(self, series_id, event_info, event):
         with self._lock:
@@ -291,6 +292,7 @@ class mediaservermsgai(_PluginBase):
         with self._lock:
             if series_id not in self._pending_messages: return
             msg_list = self._pending_messages.pop(series_id)
+            if series_id in self._aggregate_timers: del self._aggregate_timers[series_id]
         if msg_list: self._process_media_event(msg_list[0][1], msg_list[0][0])
 
     def _merge_continuous_episodes(self, events):
@@ -316,9 +318,10 @@ class mediaservermsgai(_PluginBase):
         return ", ".join(merged)
 
     def _extract_tmdb_id(self, event_info: WebhookEventInfo):
-        # 增加拦截：如果已经判定为排除库且设为 None，则直接返回 None
+        # 如果已经判定排除，则直接封死 ID 提取
         curr_lib = self._get_library_name(event_info)
-        if curr_lib in self._exclude_libs: return None
+        if any(ex in curr_lib for ex in self._exclude_libs) if curr_lib else False:
+            return None
 
         tid = event_info.tmdb_id
         if not tid and event_info.json_object:
