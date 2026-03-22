@@ -41,7 +41,7 @@ class mediaservermsgai(_PluginBase):
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "1.9.4"
+    plugin_version = "1.9.5"
     plugin_author = "jxxghp"
     author_url = "https://github.com/jxxghp"
     plugin_config_prefix = "mediaservermsgai_"
@@ -1083,17 +1083,13 @@ class mediaservermsgai(_PluginBase):
         return server_name
 
     def _get_emby_local_image(self, event_info: WebhookEventInfo) -> Optional[str]:
-        """从Emby本地构造图片URL（不经过TMDB），使用webhook中的ImageTags"""
+        """从Emby本地构造图片URL（不经过TMDB），优先使用Backdrop横幅图"""
         try:
             if not event_info.json_object:
                 return None
             item_data = event_info.json_object.get('Item', {})
             item_id = item_data.get('Id')
-            image_tags = item_data.get('ImageTags', {})
-            # 优先 Primary，其次 Thumb
-            tag = image_tags.get('Primary') or image_tags.get('Thumb')
-            image_type = 'Primary' if image_tags.get('Primary') else 'Thumb'
-            if not item_id or not tag:
+            if not item_id:
                 return None
             service = self.service_info(event_info.server_name)
             if not service:
@@ -1102,8 +1098,21 @@ class mediaservermsgai(_PluginBase):
             apikey = service.config.config.get('apikey', '')
             if not host or not apikey:
                 return None
+            # 优先 Backdrop（横幅大图）
+            backdrop_tags = item_data.get('BackdropImageTags', [])
+            if backdrop_tags:
+                tag = backdrop_tags[0]
+                url = f"{host}/emby/Items/{item_id}/Images/Backdrop/0?tag={tag}&maxWidth=1920&quality=70&api_key={apikey}"
+                logger.debug(f"构造Emby Backdrop图片URL: {url[:80]}...")
+                return url
+            # 回退 Primary
+            image_tags = item_data.get('ImageTags', {})
+            tag = image_tags.get('Primary') or image_tags.get('Thumb')
+            image_type = 'Primary' if image_tags.get('Primary') else 'Thumb'
+            if not tag:
+                return None
             url = f"{host}/emby/Items/{item_id}/Images/{image_type}?maxHeight=450&maxWidth=450&tag={tag}&quality=90&api_key={apikey}"
-            logger.debug(f"构造Emby本地图片URL: {url[:80]}...")
+            logger.debug(f"构造Emby Primary图片URL: {url[:80]}...")
             return url
         except Exception as e:
             logger.debug(f"构造Emby本地图片URL异常: {str(e)}")
