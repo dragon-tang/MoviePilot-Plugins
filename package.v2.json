@@ -1,13 +1,14 @@
 {
   "mediaservermsgai": {
-    "name": "媒体库服务器通知AI版",
+    "name": "媒体库服务器通知自用版",
     "description": "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)",
     "labels": "消息通知,媒体库",
-    "version": "1.9.2",
+    "version": "1.9.3",
     "icon": "mediaplay.png",
     "author": "jxxghp",
     "level": 1,
     "history": {
+      "v1.9.3": "可排除特定库",
       "v1.9.2": "修复单集剧集显示",
       "v1.9.1": "调整评分显示",
       "v1.9.0": "TMDB未识别视频不发送通知",
@@ -24,91 +25,5 @@
       "v1.5": "支持独立控制媒体服务器通知",
       "v1.4": "MoviePilot V2 版本媒体库服务器通知插件"
     }
-  },
-  "SaMediaSyncDel": {
-        "name": "神医媒体文件同步删除自用版",
-        "description": "通过神医插件通知同步删除历史记录、源文件和下载任务。",
-        "labels": "媒体库，文件整理",
-        "version": "1.1.1",
-        "icon": "mediasyncdel.png",
-        "author": "DDSRem",
-        "level": 1,
-        "history": {
-            "v1.1.1": "合并大佬代码，对于 Emby 新版本 API 单独处理，兼容季删除",
-            "v1.1.0": "修改删除通知样式",         
-            "v1.0.7": "适配 MoviePilot v2.7.4【此版本及插件后续版本均强制要求MPv2.7.4+】",
-            "v1.0.6": "更新神医版本提示信息",
-            "v1.0.5": "修复引用类丢失",
-            "v1.0.4": "修复实例不规范调用导致报错",
-            "v1.0.3": "支持本地文件同步删除",
-            "v1.0.2": "移除本地同步删除，支持123云盘同步删除，支持不存在TMDB ID时强制删除",
-            "v1.0.1": "支持无历史记录时强制删除网盘文件",
-            "v1.0.0": "发布"
-        }
-    },
-    "MediaCoverGenerator": {
-        "name": "媒体库封面生成AI版",
-        "description": "自动生成媒体库封面，支持 Emby，Jellyfin",
-        "labels": "封面,媒体库",
-        "version": "1.9.1",
-        "icon": "https://raw.githubusercontent.com/siryle/MoviePilot-Plugins/main/icons/emby.png",
-        "author": "justzerock,deepseek",
-        "level": 1,
-        "history": {
-            "v1.9.1": "更新版本号",
-            "v0.9.1": "AI添加文字颜色",
-            "v0.9.0": "AI添加角标（媒体总数）",
-            "v0.8.7": "支持生成播放列表封面",
-            "v0.8.6": "修复无参数造成无法生图的错误",
-            "v0.8.5": "可选优先使用海报或者背景图，修复部分bug",
-            "v0.8.4": "补充部分信息",
-            "v0.8.3": "修复合集等库图片获取问题，改善字体下载问题，增加无用的若干选项",
-            "v0.8.2": "1. 支持添加本地字体路径  2. 未设置标题或参数错误时，自动使用媒体库名",
-            "v0.8.1": "修复 bug，也许还有漏网之鱼",
-            "v0.8": "改界面，加风格，可能还有新 bug",
-            "v0.7": "修复一个非常简单的小问题，我真是太菜了",
-            "v0.6": "修复部分问题",
-            "v0.5": "微调图片处理颜色",
-            "v0.4": "自定义背景图目录",
-            "v0.3": "修复bug",
-            "v0.2": "测试",
-            "v0.1": "自定义字体"
-        }
-    },
-    "HdhiveSign": {
-    "name": "影巢签到AI版",
-    "description": "自动完成影巢每日签到，支持失败重试和历史记录",
-    "labels": "签到,影巢",
-    "version": "1.4.1",
-    "icon": "https://raw.githubusercontent.com/madrays/MoviePilot-Plugins/main/icons/hdhive.ico",
-    "author": "madrays",
-    "level": 1,
-    "v2": true,
-    "history": {
-      "v1.4.1": "去除账号密码登录方式，仅保留Cookie登录，简化配置",
-      "v1.4.0": "AI添加多账户支持",
-      "v1.3.0": "用户信息卡片美化；通知追加用户摘要；重复签到与执行前预拉取用户信息；RSC解析兜底",
-      "v1.2.0": "自动登录刷新Cookie：cloudscraper与Playwright兜底；修复重复失败记录；默认域名更新为 hdhive.com",
-      "v1.1.0": "域名改为可配置；统一API拼接；精简日志",
-      "v1.0": "首次发布"
-    }
-  },
-    "DockerCopilotHelper": {
-        "name": "DC助手AI版",
-        "description": "配合DockerCopilot,完成更新通知、自动更新、自动备份功能",
-        "labels": "Docker",
-        "version": "2.0.2",
-        "icon": "https://raw.githubusercontent.com/siryle/MoviePilot-Plugins/main/icons/Docker_Copilot.png",
-        "author": "gxterry",
-        "level": 1,
-        "history": {
-            "v2.0.2": "AI调整布局解决可更新容器列表溢出",
-            "v2.0.1": "AI优化日志、注释",
-            "v2.0.0": "AI重构支持v2插件",
-            "v1.2.1": "AI添加消息通知emoji前缀",
-            "v1.2.0": "AI修复未开启自动更新通知时依旧会收到通知",
-            "v1.1.2": "修复网络异常导致的数据无法加载问题",
-            "v1.1.1": "修复面板加载异常"
-        }
     }
 }
