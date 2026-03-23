@@ -43,7 +43,7 @@ class mediaservermsgai(_PluginBase):
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "1.9.7"
+    plugin_version = "1.9.8"
     plugin_author = "jxxghp,dragon-tang"
     author_url = "https://github.com/dragon-tang"
     plugin_config_prefix = "mediaservermsgai_"
@@ -1059,7 +1059,9 @@ class mediaservermsgai(_PluginBase):
                         apikey = service.config.config.get('apikey')
                         if host and apikey:
                             import requests
-                            api_url = f"{host}/emby/Items?Ids={series_id}&Fields=ProviderIds&api_key={apikey}"
+                            # 根据服务器类型选择API路径
+                            api_path = self._get_api_path(event_info.server_name)
+                            api_url = f"{host}{api_path}/Items?Ids={series_id}&Fields=ProviderIds&api_key={apikey}"
                             logger.debug(f"请求API: {api_url}")
                             res = requests.get(api_url, timeout=5)
                             if res.status_code == 200:
@@ -1076,21 +1078,38 @@ class mediaservermsgai(_PluginBase):
         logger.debug(f"未提取到TMDB ID: {event_info.item_name}")
         return None
 
+    def _get_api_path(self, server_name: str) -> str:
+        """
+        根据服务器类型获取API路径
+
+        Args:
+            server_name: 服务器名称
+
+        Returns:
+            str: API路径前缀 (/emby, /jellyfin, 或空字符串用于Plex)
+        """
+        if not server_name:
+            return "/emby"
+
+        server_lower = server_name.lower()
+        if "jellyfin" in server_lower:
+            return ""
+        elif "plex" in server_lower:
+            return ""
+        else:
+            return "/emby"
+
     def _get_server_name_cn(self, event_info):
         """获取服务器中文名称"""
         server_name = ""
         if event_info.json_object and isinstance(event_info.json_object.get('Server'), dict):
             server_name = event_info.json_object.get('Server', {}).get('Name')
             logger.debug(f"从JSON获取服务器名: {server_name}")
-        
+
         if not server_name:
-            server_name = event_info.server_name or "Emby"
+            server_name = event_info.server_name or "媒体服务器"
             logger.debug(f"从event_info获取服务器名: {server_name}")
-        
-        if not server_name.lower().endswith("emby"):
-            server_name += "Emby"
-            logger.debug(f"标准化服务器名: {server_name}")
-        
+
         return server_name
 
     def _get_emby_local_image(self, event_info: WebhookEventInfo) -> Optional[str]:
@@ -1105,16 +1124,18 @@ class mediaservermsgai(_PluginBase):
             service = self.service_info(event_info.server_name)
             if not service:
                 return None
-            # 优先使用自定义图片Host，否则使用插件配置的Emby地址
+            # 优先使用自定义图片Host，否则使用插件配置的服务器地址
             host = (self._emby_image_host or service.config.config.get('host', '')).rstrip('/')
             if not host:
                 return None
+            # 获取API路径
+            api_path = self._get_api_path(event_info.server_name)
             # 优先 Backdrop（横幅大图）
             backdrop_tags = item_data.get('BackdropImageTags', [])
             if backdrop_tags:
                 tag = backdrop_tags[0]
-                url = f"{host}/emby/Items/{item_id}/Images/Backdrop/0?tag={tag}&maxWidth=1920&quality=70"
-                logger.debug(f"构造Emby Backdrop图片URL: {url[:80]}...")
+                url = f"{host}{api_path}/Items/{item_id}/Images/Backdrop/0?tag={tag}&maxWidth=1920&quality=70"
+                logger.debug(f"构造 Backdrop图片URL: {url[:80]}...")
                 return url
             # 回退 Primary
             image_tags = item_data.get('ImageTags', {})
@@ -1122,8 +1143,8 @@ class mediaservermsgai(_PluginBase):
             image_type = 'Primary' if image_tags.get('Primary') else 'Thumb'
             if not tag:
                 return None
-            url = f"{host}/emby/Items/{item_id}/Images/{image_type}?maxHeight=450&maxWidth=450&tag={tag}&quality=90"
-            logger.debug(f"构造Emby Primary图片URL: {url[:80]}...")
+            url = f"{host}{api_path}/Items/{item_id}/Images/{image_type}?maxHeight=450&maxWidth=450&tag={tag}&quality=90"
+            logger.debug(f"构造 Primary图片URL: {url[:80]}...")
             return url
         except Exception as e:
             logger.debug(f"构造Emby本地图片URL异常: {str(e)}")
@@ -1151,14 +1172,15 @@ class mediaservermsgai(_PluginBase):
             base_url = f"{parsed.scheme}://{parsed.netloc}"
             item_id = item_data.get('Id')
             primary_tag = item_data.get('ImageTags', {}).get('Primary')
-            
+
             if not primary_tag:
                 item_id = item_data.get('PrimaryImageItemId')
                 primary_tag = item_data.get('PrimaryImageTag')
                 logger.debug(f"备用图片标签: item_id={item_id}, tag={primary_tag}")
-            
+
             if item_id and primary_tag:
-                img_url = f"{base_url}/emby/Items/{item_id}/Images/Primary?maxHeight=450&maxWidth=450&tag={primary_tag}&quality=90"
+                api_path = self._get_api_path(server_name)
+                img_url = f"{base_url}{api_path}/Items/{item_id}/Images/Primary?maxHeight=450&maxWidth=450&tag={primary_tag}&quality=90"
                 logger.debug(f"生成音频图片URL: {img_url[:50]}...")
                 return img_url
             
@@ -1274,8 +1296,9 @@ class mediaservermsgai(_PluginBase):
 
             import requests
             fields = "Path,MediaStreams,Container,Size,RunTimeTicks,ImageTags,ProviderIds"
-            api_url = f"{base_url}/emby/Items?ParentId={album_id}&Fields={fields}&api_key={api_key}"
-            
+            api_path = self._get_api_path(event_info.server_name)
+            api_url = f"{base_url}{api_path}/Items?ParentId={album_id}&Fields={fields}&api_key={api_key}"
+
             logger.debug(f"请求专辑歌曲列表: {api_url}")
             res = requests.get(api_url, timeout=10)
             
@@ -1286,9 +1309,9 @@ class mediaservermsgai(_PluginBase):
                 for i, song in enumerate(items):
                     logger.debug(f"处理第 {i+1} 首歌曲: {song.get('Name', '未知歌曲')}")
                     self._send_single_audio_notify(
-                        song, album_name, album_artist, 
-                        primary_image_item_id, primary_image_tag, 
-                        base_url
+                        song, album_name, album_artist,
+                        primary_image_item_id, primary_image_tag,
+                        base_url, event_info.server_name
                     )
             else:
                 logger.error(f"请求专辑歌曲失败，状态码: {res.status_code}")
@@ -1297,8 +1320,8 @@ class mediaservermsgai(_PluginBase):
             logger.error(f"处理音乐专辑失败: {str(e)}")
             logger.error(traceback.format_exc())
 
-    def _send_single_audio_notify(self, song: dict, album_name, album_artist, 
-                                  cover_item_id, cover_tag, base_url):
+    def _send_single_audio_notify(self, song: dict, album_name, album_artist,
+                                  cover_item_id, cover_tag, base_url, server_name: str = None):
         """发送单曲通知"""
         try:
             song_name = song.get('Name', '未知歌曲')
@@ -1310,7 +1333,7 @@ class mediaservermsgai(_PluginBase):
 
             title = f"🎵 新入库媒体：{song_name}\n"
             texts = []
-            
+
             texts.append(f"⏰ 入库：{time.strftime('%H:%M:%S', time.localtime())}")
             texts.append(f"👤 歌手：{artist}")
             if album_name: texts.append(f"💿 专辑：{album_name}")
@@ -1319,7 +1342,8 @@ class mediaservermsgai(_PluginBase):
 
             image_url = None
             if cover_item_id and cover_tag:
-                 image_url = f"{base_url}/emby/Items/{cover_item_id}/Images/Primary?maxHeight=450&maxWidth=450&tag={cover_tag}&quality=90"
+                 api_path = self._get_api_path(server_name) if server_name else "/emby"
+                 image_url = f"{base_url}{api_path}/Items/{cover_item_id}/Images/Primary?maxHeight=450&maxWidth=450&tag={cover_tag}&quality=90"
                  logger.debug(f"设置专辑封面图片")
 
             link = None
