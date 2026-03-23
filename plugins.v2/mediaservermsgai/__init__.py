@@ -667,7 +667,7 @@ class mediaservermsgai(_PluginBase):
 
                 # 根据事件类型设置不同的标题前缀
                 if "library.new" in event_info.event:
-                    message_title = f"🆕 {title_name} 已入库\n"
+                    message_title = f"🆕 {title_name} 已入库"
                 elif "playback.start" in event_info.event or "media.play" in event_info.event or "PlaybackStart" in event_info.event:
                     message_title = f"▶️ 开始播放：{title_name}"
                 elif "playback.stop" in event_info.event or "media.stop" in event_info.event or "PlaybackStop" in event_info.event:
@@ -895,7 +895,7 @@ class mediaservermsgai(_PluginBase):
             title_name += f" ({year})"
             logger.debug(f"添加年份: {year}")
 
-        message_title = f"🆕 {title_name} 已入库 (含{count}个文件)\n"
+        message_title = f"🆕 {title_name} 已入库 (含{count}个文件)"
         logger.debug(f"聚合消息标题: {message_title}")
 
         message_texts = []
