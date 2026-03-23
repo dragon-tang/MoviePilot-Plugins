@@ -1331,7 +1331,7 @@ class mediaservermsgai(_PluginBase):
             container = song.get('Container', '').upper()
             size = self._format_size(song.get('Size', 0))
 
-            title = f"🎵 新入库媒体：{song_name}\n"
+            title = f"🎵 新入库媒体：{song_name}"
             texts = []
 
             texts.append(f"⏰ 入库：{time.strftime('%H:%M:%S', time.localtime())}")
