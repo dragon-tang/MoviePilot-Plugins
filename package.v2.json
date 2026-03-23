@@ -3,11 +3,12 @@
     "name": "媒体库服务器通知AI版",
     "description": "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)",
     "labels": "消息通知,媒体库",
-    "version": "1.9.6",
+    "version": "1.9.7",
     "icon": "mediaplay.png",
     "author": "jxxghp",
     "level": 1,
     "history": {
+      "v1.9.7": "补充功能说明",
       "v1.9.6": "自定义图片host",
       "v1.9.5": "修复排除的特定库图片获取走tmdb",
       "v1.9.3": "可排除特定库",
