@@ -29,6 +29,8 @@ class mediaservermsgai(_PluginBase):
     5. 基于TMDB元数据增强消息内容（评分、分类、演员等）
     6. 支持音乐专辑和单曲入库通知
     7. 支持TMDB未识别视频不发送通知（包含播放事件）
+    8. 支持路径关键词黑名单，命中路径跳过TMDB识别（适用于成人内容等不需刮削的媒体库）
+    9. 拦截路径的媒体自动使用Emby本地图片（Backdrop/Primary），避免错误刮削带来的错误图片
     """
 
     # ==================== 常量定义 ====================
@@ -41,9 +43,9 @@ class mediaservermsgai(_PluginBase):
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "1.9.6"
-    plugin_author = "jxxghp"
-    author_url = "https://github.com/jxxghp"
+    plugin_version = "1.9.7"
+    plugin_author = "jxxghp,dragon-tang"
+    author_url = "https://github.com/dragon-tang"
     plugin_config_prefix = "mediaservermsgai_"
     plugin_order = 14
     auth_level = 1
@@ -665,7 +667,7 @@ class mediaservermsgai(_PluginBase):
 
                 # 根据事件类型设置不同的标题前缀
                 if "library.new" in event_info.event:
-                    message_title = f"🆕 {title_name} 已入库"
+                    message_title = f"🆕 {title_name} 已入库\n"
                 elif "playback.start" in event_info.event or "media.play" in event_info.event or "PlaybackStart" in event_info.event:
                     message_title = f"▶️ 开始播放：{title_name}"
                 elif "playback.stop" in event_info.event or "media.stop" in event_info.event or "PlaybackStop" in event_info.event:
@@ -893,7 +895,7 @@ class mediaservermsgai(_PluginBase):
             title_name += f" ({year})"
             logger.debug(f"添加年份: {year}")
 
-        message_title = f"🆕 {title_name} 已入库 (含{count}个文件)"
+        message_title = f"🆕 {title_name} 已入库 (含{count}个文件)\n"
         logger.debug(f"聚合消息标题: {message_title}")
 
         message_texts = []
@@ -1306,7 +1308,7 @@ class mediaservermsgai(_PluginBase):
             container = song.get('Container', '').upper()
             size = self._format_size(song.get('Size', 0))
 
-            title = f"🎵 新入库媒体：{song_name}"
+            title = f"🎵 新入库媒体：{song_name}\n"
             texts = []
             
             texts.append(f"⏰ 入库：{time.strftime('%H:%M:%S', time.localtime())}")
