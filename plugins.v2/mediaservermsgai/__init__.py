@@ -43,7 +43,7 @@ class mediaservermsgai(_PluginBase):
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "1.9.8"
+    plugin_version = "1.9.9"
     plugin_author = "jxxghp,dragon-tang"
     author_url = "https://github.com/dragon-tang"
     plugin_config_prefix = "mediaservermsgai_"
@@ -770,11 +770,16 @@ class mediaservermsgai(_PluginBase):
             logger.debug(f"消息内容行数: {len(message_texts)}")
             logger.debug(f"消息图片: {'已设置' if image_url else '未设置'}")
             logger.debug(f"播放链接: {'已设置' if play_link else '未设置'}")
-            
+
+            # 入库消息在标题和内容之间添加空行
+            message_text = "\n".join(message_texts)
+            if "library.new" in event_info.event:
+                message_text = "\n" + message_text
+
             self.post_message(
                 mtype=NotificationType.MediaServer,
                 title=message_title,
-                text="\n".join(message_texts),
+                text=message_text,
                 image=image_url,
                 link=play_link
             )
@@ -961,7 +966,7 @@ class mediaservermsgai(_PluginBase):
         self.post_message(
             mtype=NotificationType.MediaServer,
             title=message_title,
-            text="\n".join(message_texts),
+            text="\n" + "\n".join(message_texts),
             image=image_url,
             link=play_link
         )
