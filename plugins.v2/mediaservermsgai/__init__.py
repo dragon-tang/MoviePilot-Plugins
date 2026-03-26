@@ -369,7 +369,20 @@ class mediaservermsgai(_PluginBase):
             if not event_info:
                 logger.warning("事件数据为空，跳过处理")
                 return
-            
+
+            # 打印完整的 webhook 原始数据（DEBUG 级别）
+            logger.debug("=" * 60)
+            logger.debug("Webhook 原始数据:")
+            logger.debug(f"event_info 对象: {event_info}")
+            if event_info.json_object:
+                import json
+                try:
+                    logger.debug(f"JSON 数据:\n{json.dumps(event_info.json_object, indent=2, ensure_ascii=False)}")
+                except Exception as e:
+                    logger.debug(f"JSON 序列化失败: {str(e)}")
+                    logger.debug(f"原始 json_object: {event_info.json_object}")
+            logger.debug("=" * 60)
+
             # 记录事件基本信息
             logger.info(f"事件类型: {event_info.event}")
             logger.info(f"媒体名称: {event_info.item_name}")
