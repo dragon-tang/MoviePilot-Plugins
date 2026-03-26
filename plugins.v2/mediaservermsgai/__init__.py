@@ -606,18 +606,36 @@ class mediaservermsgai(_PluginBase):
         # 从json_object中提取挂载路径信息
         mount_paths = []
         if event_info.json_object and isinstance(event_info.json_object, dict):
-            # 尝试从不同可能的字段获取挂载路径
-            mount_paths_raw = (
-                event_info.json_object.get('MountPaths') or
-                event_info.json_object.get('mount_paths') or
-                event_info.json_object.get('Description', '').split('\n')
-            )
+            # 优先从 Description 字段解析
+            description = event_info.json_object.get('Description', '')
+            if description:
+                logger.debug(f"解析 Description 字段: {description[:100]}...")
+                lines = description.split('\n')
+                in_mount_section = False
+                for line in lines:
+                    line = line.strip()
+                    if line == 'Mount Paths:':
+                        in_mount_section = True
+                        continue
+                    if in_mount_section and line:
+                        # 跳过其他标题行
+                        if ':' in line and not line.startswith('http'):
+                            break
+                        # 添加挂载路径
+                        if line.startswith('http') or line.startswith('/'):
+                            mount_paths.append(line)
+                            logger.debug(f"提取挂载路径: {line}")
 
-            if isinstance(mount_paths_raw, list):
-                mount_paths = [p.strip() for p in mount_paths_raw if p and p.strip()]
-            elif isinstance(mount_paths_raw, str):
-                # 如果是字符串，按行分割
-                mount_paths = [p.strip() for p in mount_paths_raw.split('\n') if p.strip() and not p.strip().startswith('Item')]
+            # 备用方案：从其他字段获取
+            if not mount_paths:
+                mount_paths_raw = (
+                    event_info.json_object.get('MountPaths') or
+                    event_info.json_object.get('mount_paths')
+                )
+                if isinstance(mount_paths_raw, list):
+                    mount_paths = [p.strip() for p in mount_paths_raw if p and p.strip()]
+                elif isinstance(mount_paths_raw, str):
+                    mount_paths = [p.strip() for p in mount_paths_raw.split('\n') if p.strip()]
 
         title = f"🗑️ 神医助手 - 媒体深度删除"
         texts = []
@@ -628,19 +646,37 @@ class mediaservermsgai(_PluginBase):
             texts.append(f"📂 本地路径：\n{item_path}")
 
         if mount_paths:
-            mount_paths_text = "\n".join([f"  • {path}" for path in mount_paths])
-            texts.append(f"💾 挂载路径：\n{mount_paths_text}")
+            texts.append(f"💾 挂载路径：")
+            for path in mount_paths:
+                texts.append(f"• {path}")
 
-        # 尝试提取TMDB ID并获取图片
-        tmdb_id = self._extract_tmdb_id(event_info)
-        image_url = event_info.image_url
+        # 图片处理：优先使用 Emby 本地图片（避免错误刮削的图片）
+        image_url = None
 
-        if not image_url and tmdb_id:
-            logger.debug(f"尝试获取TMDB图片: {tmdb_id}")
-            mtype = MediaType.MOVIE if event_info.item_type == "MOV" else MediaType.TV
-            image_url = self._get_tmdb_image(event_info, mtype)
+        # 检查路径是否命中黑名单
+        _raw_path = item_path or ""
+        if not _raw_path and event_info.json_object:
+            _raw_path = event_info.json_object.get('Item', {}).get('Path', '')
+        _path_blocked = any(kw in _raw_path for kw in self._path_skip_keywords) if (self._path_skip_keywords and _raw_path) else False
+
+        # 如果路径被拦截或没有 event_info.image_url，优先使用 Emby 本地图片
+        if _path_blocked or not event_info.image_url:
+            logger.debug("尝试获取 Emby 本地图片")
+            image_url = self._get_emby_local_image(event_info)
             if image_url:
-                logger.debug(f"成功获取TMDB图片: {image_url[:50]}...")
+                logger.debug(f"成功获取 Emby 本地图片: {image_url[:50]}...")
+        else:
+            image_url = event_info.image_url
+
+        # 如果还是没有图片，尝试 TMDB
+        if not image_url:
+            tmdb_id = self._extract_tmdb_id(event_info)
+            if tmdb_id:
+                logger.debug(f"尝试获取 TMDB 图片: {tmdb_id}")
+                mtype = MediaType.MOVIE if event_info.item_type == "MOV" else MediaType.TV
+                image_url = self._get_tmdb_image(event_info, mtype)
+                if image_url:
+                    logger.debug(f"成功获取 TMDB 图片: {image_url[:50]}...")
 
         logger.debug(f"发送深度删除消息: {title}")
         self.post_message(
