@@ -44,7 +44,7 @@ class mediaservermsgai(_PluginBase):
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
     plugin_version = "2.0.0"
-    plugin_author = "jxxghp,dragon-tang"
+    plugin_author = "dragon-tang,jxxghp"
     author_url = "https://github.com/dragon-tang"
     plugin_config_prefix = "mediaservermsgai_"
     plugin_order = 14
