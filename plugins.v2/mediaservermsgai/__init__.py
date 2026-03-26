@@ -43,7 +43,7 @@ class mediaservermsgai(_PluginBase):
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "1.9.9"
+    plugin_version = "2.0.0"
     plugin_author = "jxxghp,dragon-tang"
     author_url = "https://github.com/dragon-tang"
     plugin_config_prefix = "mediaservermsgai_"
@@ -90,7 +90,8 @@ class mediaservermsgai(_PluginBase):
         "item.markplayed": "标记已播放",
         "item.markunplayed": "标记未播放",
         "PlaybackStart": "开始播放",
-        "PlaybackStop": "停止播放"
+        "PlaybackStop": "停止播放",
+        "strm.deepdelete": "深度删除"
     }
     
     # ==================== 媒体服务器默认图标（优化后的官方高清图标）====================
@@ -257,6 +258,7 @@ class mediaservermsgai(_PluginBase):
             {"title": "用户标记", "value": "item.rate|item.markplayed|item.markunplayed"},
             {"title": "登录提醒", "value": "user.authenticated|user.authenticationfailed"},
             {"title": "系统测试", "value": "system.webhooktest|system.notificationtest"},
+            {"title": "媒体深度删除", "value": "strm.deepdelete"},
         ]
         return [
             {
@@ -437,6 +439,12 @@ class mediaservermsgai(_PluginBase):
                 self._handle_rate_event(event_info)
                 return
 
+            # === 媒体深度删除消息 ===
+            if "strm.deepdelete" in event_type:
+                logger.info("处理媒体深度删除消息")
+                self._handle_deep_delete_event(event_info)
+                return
+
             # === 音乐专辑处理 ===
             if event_info.json_object and event_info.json_object.get('Item', {}).get('Type') == 'MusicAlbum' and event_type == 'library.new':
                 logger.info("处理音乐专辑消息")
@@ -536,22 +544,22 @@ class mediaservermsgai(_PluginBase):
             event_info (WebhookEventInfo): Webhook事件信息
         """
         logger.info("处理评分/标记事件通知")
-        
+
         # 评分/标记事件也需要检查TMDB识别
         if self._filter_unrecognized and event_info.item_type in ["MOV", "TV", "SHOW"]:
             tmdb_id = self._extract_tmdb_id(event_info)
             if not tmdb_id:
                 logger.info(f"TMDB未识别视频，跳过评分通知: {event_info.item_name}")
                 return
-        
+
         item_name = event_info.item_name
-            
+
         title = f"⭐ 用户评分：{item_name}"
         texts = []
         texts.append(f"👤 用户：{event_info.user_name}")
         texts.append(f"🏷️ 标记：{self._webhook_actions.get(event_info.event, '已标记')}")
         texts.append(f"⏰ 时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
-        
+
         # 尝试获取图片
         tmdb_id = self._extract_tmdb_id(event_info)
         image_url = event_info.image_url
@@ -563,6 +571,65 @@ class mediaservermsgai(_PluginBase):
                 logger.debug(f"成功获取TMDB图片: {image_url[:50]}...")
 
         logger.debug(f"发送评分消息: {title}")
+        self.post_message(
+            mtype=NotificationType.MediaServer,
+            title=title,
+            text="\n".join(texts),
+            image=image_url or self._webhook_images.get(event_info.channel)
+        )
+
+    def _handle_deep_delete_event(self, event_info: WebhookEventInfo):
+        """
+        处理神医助手媒体深度删除消息
+
+        Args:
+            event_info (WebhookEventInfo): Webhook事件信息
+        """
+        logger.info("处理神医助手媒体深度删除事件通知")
+
+        item_name = event_info.item_name or "未知媒体"
+        item_path = event_info.item_path or ""
+
+        # 从json_object中提取挂载路径信息
+        mount_paths = []
+        if event_info.json_object and isinstance(event_info.json_object, dict):
+            # 尝试从不同可能的字段获取挂载路径
+            mount_paths_raw = (
+                event_info.json_object.get('MountPaths') or
+                event_info.json_object.get('mount_paths') or
+                event_info.json_object.get('Description', '').split('\n')
+            )
+
+            if isinstance(mount_paths_raw, list):
+                mount_paths = [p.strip() for p in mount_paths_raw if p and p.strip()]
+            elif isinstance(mount_paths_raw, str):
+                # 如果是字符串，按行分割
+                mount_paths = [p.strip() for p in mount_paths_raw.split('\n') if p.strip() and not p.strip().startswith('Item')]
+
+        title = f"🗑️ 神医助手 - 媒体深度删除"
+        texts = []
+        texts.append(f"⏰ 时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
+        texts.append(f"📝 媒体名称：\n{item_name}")
+
+        if item_path:
+            texts.append(f"📂 本地路径：\n{item_path}")
+
+        if mount_paths:
+            mount_paths_text = "\n".join([f"  • {path}" for path in mount_paths])
+            texts.append(f"💾 挂载路径：\n{mount_paths_text}")
+
+        # 尝试提取TMDB ID并获取图片
+        tmdb_id = self._extract_tmdb_id(event_info)
+        image_url = event_info.image_url
+
+        if not image_url and tmdb_id:
+            logger.debug(f"尝试获取TMDB图片: {tmdb_id}")
+            mtype = MediaType.MOVIE if event_info.item_type == "MOV" else MediaType.TV
+            image_url = self._get_tmdb_image(event_info, mtype)
+            if image_url:
+                logger.debug(f"成功获取TMDB图片: {image_url[:50]}...")
+
+        logger.debug(f"发送深度删除消息: {title}")
         self.post_message(
             mtype=NotificationType.MediaServer,
             title=title,
