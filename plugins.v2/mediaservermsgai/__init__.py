@@ -639,11 +639,11 @@ class mediaservermsgai(_PluginBase):
 
         title = f"🗑️ 神医助手 - 媒体深度删除"
         texts = []
-        texts.append(f"⏰ 时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
-        texts.append(f"📝 媒体名称：\n{item_name}")
+        texts.append(f"\n⏰ 时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
+        texts.append(f"📝 媒体名称：\n{item_name}\n")
 
         if item_path:
-            texts.append(f"📂 本地路径：\n{item_path}")
+            texts.append(f"📂 本地路径：\n{item_path}\n")
 
         if mount_paths:
             texts.append(f"💾 挂载路径：")
