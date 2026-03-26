@@ -639,13 +639,16 @@ class mediaservermsgai(_PluginBase):
 
         title = f"🗑️ 神医助手 - 媒体深度删除"
         texts = []
-        texts.append(f"\n⏰ 时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
-        texts.append(f"📝 媒体名称：\n{item_name}\n")
+        texts.append(f"⏰ 时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
+        texts.append("")  # 空行
+        texts.append(f"📝 媒体名称：\n{item_name}")
 
         if item_path:
-            texts.append(f"📂 本地路径：\n{item_path}\n")
+            texts.append("")  # 空行
+            texts.append(f"📂 本地路径：\n{item_path}")
 
         if mount_paths:
+            texts.append("")  # 空行
             texts.append(f"💾 挂载路径：")
             for path in mount_paths:
                 texts.append(f"• {path}")
@@ -682,7 +685,7 @@ class mediaservermsgai(_PluginBase):
         self.post_message(
             mtype=NotificationType.MediaServer,
             title=title,
-            text="\n".join(texts),
+            text="\n" + "\n".join(texts),
             image=image_url or self._webhook_images.get(event_info.channel)
         )
 
