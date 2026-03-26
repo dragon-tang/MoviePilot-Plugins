@@ -653,38 +653,12 @@ class mediaservermsgai(_PluginBase):
             for path in mount_paths:
                 texts.append(f"• {path}")
 
-        # 图片处理：优先使用 Emby 本地图片（避免错误刮削的图片）
-        image_url = None
-
-        # 检查路径是否命中黑名单
-        _raw_path = item_path or ""
-        if not _raw_path and event_info.json_object:
-            _raw_path = event_info.json_object.get('Item', {}).get('Path', '')
-        _path_blocked = any(kw in _raw_path for kw in self._path_skip_keywords) if (self._path_skip_keywords and _raw_path) else False
-
-        # 如果路径被拦截或没有 event_info.image_url，优先使用 Emby 本地图片
-        if _path_blocked or not event_info.image_url:
-            image_url = self._get_emby_local_image(event_info)
-            logger.info(f"路径已拦截，使用Emby本地图片: {image_url}")
-        else:
-            image_url = event_info.image_url
-
-        # 如果还是没有图片，尝试 TMDB
-        if not image_url:
-            tmdb_id = self._extract_tmdb_id(event_info)
-            if tmdb_id:
-                logger.debug(f"尝试获取 TMDB 图片: {tmdb_id}")
-                mtype = MediaType.MOVIE if event_info.item_type == "MOV" else MediaType.TV
-                image_url = self._get_tmdb_image(event_info, mtype)
-                if image_url:
-                    logger.debug(f"成功获取 TMDB 图片: {image_url}...")
-
         logger.debug(f"发送深度删除消息: {title}")
         self.post_message(
             mtype=NotificationType.MediaServer,
             title=title,
             text="\n" + "\n".join(texts),
-            image=image_url or self._webhook_images.get(event_info.channel)
+            image=None
         )
 
     def _process_media_event(self, event: Event, event_info: WebhookEventInfo):
@@ -717,6 +691,7 @@ class mediaservermsgai(_PluginBase):
                 logger.debug("事件去重检查通过")
 
             # 2. 元数据识别
+            logger.info("开始元数据识别")
             # 检查路径是否命中黑名单（用于后续跳过TMDB图片）
             _raw_path = event_info.item_path or ""
             if not _raw_path and event_info.json_object:
@@ -1265,7 +1240,7 @@ class mediaservermsgai(_PluginBase):
             if not tag:
                 return None
             url = f"{host}{api_path}/Items/{item_id}/Images/{image_type}?maxHeight=450&maxWidth=450&tag={tag}&quality=90"
-            logger.debug(f"构造 Primary图片URL: {url]}...")
+            logger.debug(f"构造 Primary图片URL: {url}...")
             return url
         except Exception as e:
             logger.debug(f"构造Emby本地图片URL异常: {str(e)}")
