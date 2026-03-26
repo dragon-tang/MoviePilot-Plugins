@@ -653,42 +653,12 @@ class mediaservermsgai(_PluginBase):
             for path in mount_paths:
                 texts.append(f"• {path}")
 
-        # 图片处理：优先从 Emby 获取本地图片
-        image_url = None
-
-        # 1. 优先尝试获取 Emby 本地图片
-        logger.debug("尝试获取 Emby 本地图片")
-        image_url = self._get_emby_local_image(event_info)
-        if image_url:
-            logger.debug(f"成功获取 Emby 本地图片: {image_url}...")
-
-        # 2. 如果没有 Emby 图片，尝试使用 event_info 中的图片
-        if not image_url:
-            image_url = event_info.image_url
-            if image_url:
-                logger.debug(f"使用 event_info 图片: {image_url}...")
-
-        # 3. 如果还是没有图片，尝试 TMDB
-        if not image_url:
-            tmdb_id = self._extract_tmdb_id(event_info)
-            if tmdb_id:
-                logger.debug(f"尝试获取 TMDB 图片: {tmdb_id}")
-                mtype = MediaType.MOVIE if event_info.item_type == "MOV" else MediaType.TV
-                image_url = self._get_tmdb_image(event_info, mtype)
-                if image_url:
-                    logger.debug(f"成功获取 TMDB 图片: {image_url}...")
-
-        # 4. 兜底使用默认图片
-        if not image_url:
-            image_url = self._webhook_images.get(event_info.channel)
-            logger.debug(f"使用默认图片: {event_info.channel}")
-
         logger.debug(f"发送深度删除消息: {title}")
         self.post_message(
             mtype=NotificationType.MediaServer,
             title=title,
             text="\n" + "\n".join(texts),
-            image=image_url
+            image=None
         )
 
     def _process_media_event(self, event: Event, event_info: WebhookEventInfo):
