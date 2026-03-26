@@ -581,7 +581,7 @@ class mediaservermsgai(_PluginBase):
             mtype = MediaType.MOVIE if event_info.item_type == "MOV" else MediaType.TV
             image_url = self._get_tmdb_image(event_info, mtype)
             if image_url:
-                logger.debug(f"成功获取TMDB图片: {image_url[:50]}...")
+                logger.debug(f"成功获取TMDB图片: {image_url}...")
 
         logger.debug(f"发送评分消息: {title}")
         self.post_message(
@@ -609,7 +609,7 @@ class mediaservermsgai(_PluginBase):
             # 优先从 Description 字段解析
             description = event_info.json_object.get('Description', '')
             if description:
-                logger.debug(f"解析 Description 字段: {description[:100]}...")
+                logger.debug(f"解析 Description 字段: {description}...")
                 lines = description.split('\n')
                 in_mount_section = False
                 for line in lines:
@@ -664,10 +664,8 @@ class mediaservermsgai(_PluginBase):
 
         # 如果路径被拦截或没有 event_info.image_url，优先使用 Emby 本地图片
         if _path_blocked or not event_info.image_url:
-            logger.debug("尝试获取 Emby 本地图片")
             image_url = self._get_emby_local_image(event_info)
-            if image_url:
-                logger.debug(f"成功获取 Emby 本地图片: {image_url[:50]}...")
+            logger.info(f"路径已拦截，使用Emby本地图片: {image_url}")
         else:
             image_url = event_info.image_url
 
@@ -679,7 +677,7 @@ class mediaservermsgai(_PluginBase):
                 mtype = MediaType.MOVIE if event_info.item_type == "MOV" else MediaType.TV
                 image_url = self._get_tmdb_image(event_info, mtype)
                 if image_url:
-                    logger.debug(f"成功获取 TMDB 图片: {image_url[:50]}...")
+                    logger.debug(f"成功获取 TMDB 图片: {image_url}...")
 
         logger.debug(f"发送深度删除消息: {title}")
         self.post_message(
@@ -719,7 +717,6 @@ class mediaservermsgai(_PluginBase):
                 logger.debug("事件去重检查通过")
 
             # 2. 元数据识别
-            logger.info("开始元数据识别")
             # 检查路径是否命中黑名单（用于后续跳过TMDB图片）
             _raw_path = event_info.item_path or ""
             if not _raw_path and event_info.json_object:
@@ -754,7 +751,7 @@ class mediaservermsgai(_PluginBase):
                 img = self._get_audio_image_url(event_info.server_name, event_info.json_object.get('Item', {}))
                 if img: 
                     image_url = img
-                    logger.debug(f"获取到音频图片: {img[:50]}...")
+                    logger.debug(f"获取到音频图片: {img}...")
 
             # 4. 视频处理 (TV/MOV)
             else:
@@ -857,7 +854,7 @@ class mediaservermsgai(_PluginBase):
                         image_url = self._get_tmdb_image(event_info, MediaType.MOVIE)
 
                     if image_url:
-                        logger.debug(f"获取到TMDB图片: {image_url[:50]}...")
+                        logger.debug(f"获取到TMDB图片: {image_url}...")
                     else:
                         logger.debug("无法获取TMDB图片")
 
@@ -868,7 +865,7 @@ class mediaservermsgai(_PluginBase):
             # 6. 播放链接
             play_link = self._get_play_link(event_info)
             if play_link:
-                logger.debug(f"生成播放链接: {play_link[:50]}...")
+                logger.debug(f"生成播放链接: {play_link}...")
             
             # 7. 兜底图片
             if not image_url:
@@ -1071,7 +1068,7 @@ class mediaservermsgai(_PluginBase):
             logger.debug("尝试获取TMDB图片")
             image_url = self._get_tmdb_image(first_info, MediaType.TV)
             if image_url:
-                logger.debug(f"获取到TMDB图片: {image_url[:50]}...")
+                logger.debug(f"获取到TMDB图片: {image_url}...")
         
         if not image_url:
             image_url = self._webhook_images.get(first_info.channel)
@@ -1079,7 +1076,7 @@ class mediaservermsgai(_PluginBase):
         
         play_link = self._get_play_link(first_info)
         if play_link:
-            logger.debug(f"生成播放链接: {play_link[:50]}...")
+            logger.debug(f"生成播放链接: {play_link}...")
 
         logger.info("发送聚合消息")
         self.post_message(
@@ -1259,7 +1256,7 @@ class mediaservermsgai(_PluginBase):
             if backdrop_tags:
                 tag = backdrop_tags[0]
                 url = f"{host}{api_path}/Items/{item_id}/Images/Backdrop/0?tag={tag}&maxWidth=1920&quality=70"
-                logger.debug(f"构造 Backdrop图片URL: {url[:80]}...")
+                logger.debug(f"构造 Backdrop图片URL: {url}...")
                 return url
             # 回退 Primary
             image_tags = item_data.get('ImageTags', {})
@@ -1268,7 +1265,7 @@ class mediaservermsgai(_PluginBase):
             if not tag:
                 return None
             url = f"{host}{api_path}/Items/{item_id}/Images/{image_type}?maxHeight=450&maxWidth=450&tag={tag}&quality=90"
-            logger.debug(f"构造 Primary图片URL: {url[:80]}...")
+            logger.debug(f"构造 Primary图片URL: {url]}...")
             return url
         except Exception as e:
             logger.debug(f"构造Emby本地图片URL异常: {str(e)}")
@@ -1305,7 +1302,7 @@ class mediaservermsgai(_PluginBase):
             if item_id and primary_tag:
                 api_path = self._get_api_path(server_name)
                 img_url = f"{base_url}{api_path}/Items/{item_id}/Images/Primary?maxHeight=450&maxWidth=450&tag={primary_tag}&quality=90"
-                logger.debug(f"生成音频图片URL: {img_url[:50]}...")
+                logger.debug(f"生成音频图片URL: {img_url}...")
                 return img_url
             
             logger.debug("未找到音频图片信息")
@@ -1347,7 +1344,7 @@ class mediaservermsgai(_PluginBase):
                     self._image_cache.pop(oldest_key)
                 
                 self._image_cache[key] = img
-                logger.debug(f"获取到TMDB图片: {img[:50]}...")
+                logger.debug(f"获取到TMDB图片: {img}...")
                 return img
             else:
                 logger.debug("未获取到TMDB图片")
@@ -1626,7 +1623,7 @@ class mediaservermsgai(_PluginBase):
         if service and service.instance:
             link = service.instance.get_play_url(event_info.item_id)
             if link:
-                logger.debug(f"播放链接生成成功: {link[:50]}...")
+                logger.debug(f"播放链接生成成功: {link}...")
             else:
                 logger.debug("播放链接生成失败")
             return link
