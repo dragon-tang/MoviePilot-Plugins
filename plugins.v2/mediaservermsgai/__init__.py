@@ -91,7 +91,7 @@ class mediaservermsgai(_PluginBase):
         "item.markunplayed": "标记未播放",
         "PlaybackStart": "开始播放",
         "PlaybackStop": "停止播放",
-        "strm.deepdelete": "深度删除"
+        "deep.delete": "深度删除"
     }
     
     # ==================== 媒体服务器默认图标（优化后的官方高清图标）====================
@@ -258,7 +258,7 @@ class mediaservermsgai(_PluginBase):
             {"title": "用户标记", "value": "item.rate|item.markplayed|item.markunplayed"},
             {"title": "登录提醒", "value": "user.authenticated|user.authenticationfailed"},
             {"title": "系统测试", "value": "system.webhooktest|system.notificationtest"},
-            {"title": "媒体深度删除", "value": "strm.deepdelete"},
+            {"title": "媒体深度删除", "value": "deep.delete"},
         ]
         return [
             {
@@ -440,7 +440,7 @@ class mediaservermsgai(_PluginBase):
                 return
 
             # === 媒体深度删除消息 ===
-            if "strm.deepdelete" in event_type:
+            if "deep.delete" in event_type:
                 logger.info("处理媒体深度删除消息")
                 self._handle_deep_delete_event(event_info)
                 return
