@@ -287,7 +287,7 @@ class MediaServerMsgAI(_PluginBase):
             if not event_info:
                 return
 
-            logger.debug(f"收到Webhook事件: {event_info.event}, 媒体: {event_info.item_name}, 服务器: {event_info.server_name}")
+            logger.info(f"收到Webhook事件: {event_info.event}, 媒体: {event_info.item_name}, 服务器: {event_info.server_name}")
             logger.debug(f"Webhook原始数据: {json.dumps(event_info.json_object, ensure_ascii=False) if event_info.json_object else 'None'}")
 
             # 事件类型检查（统一转小写，兼容 Jellyfin/Plex 大小写差异）
