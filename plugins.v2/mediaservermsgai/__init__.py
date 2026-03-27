@@ -244,7 +244,7 @@ class MediaServerMsgAI(_PluginBase):
                     {
                         'component': 'VRow',
                         'content': [
-                            {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VTextarea', 'props': {'model': 'path_skip_keywords', 'label': '路径关键词黑名单（跳过TMDB识别）', 'placeholder': '每行一个关键词，Path包含任意关键词时跳过TMDB识别\n例如：\n日本有码\n日本无码', 'rows': 4, 'hint': '命中关键词的媒体不会进行TMDB识别，若同时开启「未识别过滤」则也不会发送通知'}}]}
+                            {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VTextarea', 'props': {'model': 'path_skip_keywords', 'label': '路径关键词黑名单（跳过TMDB识别）', 'placeholder': '每行一个关键词，Path包含任意关键词时跳过TMDB识别\n例如：\n日本有\n日本无', 'rows': 4, 'hint': '命中关键词的媒体不会进行TMDB识别，若同时开启「未识别过滤」则也不会发送通知'}}]}
                         ]
                     },
                     {
