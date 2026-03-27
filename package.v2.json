@@ -3,11 +3,12 @@
     "name": "媒体库服务器通知AI版",
     "description": "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)",
     "labels": "消息通知,媒体库",
-    "version": "2.0.2",
+    "version": "2.0.3",
     "icon": "mediaplay.png",
     "author": "jxxghp",
     "level": 1,
     "history": {
+      "v2.0.3": "减少info日志信息",
       "v2.0.2": "用AI参考官方插件库多次修复优化",
       "v2.0.1": "尝试用AI参考官方插件库优化代码",
       "v2.0.0": "兼容神医助手深度删除通知",
