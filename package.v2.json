@@ -1,5 +1,5 @@
 {
-  "mediaservermsgai": {
+  "MediaServerMsgAI": {
     "name": "媒体库服务器通知AI版",
     "description": "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)",
     "labels": "消息通知,媒体库",
