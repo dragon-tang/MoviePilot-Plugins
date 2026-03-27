@@ -46,7 +46,7 @@ class MediaServerMsgAI(_PluginBase):
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "2.0.2"
+    plugin_version = "2.0.3"
     plugin_author = "dragon-tang"
     author_url = "https://github.com/dragon-tang"
     plugin_config_prefix = "mediaservermsgai_"
@@ -287,7 +287,7 @@ class MediaServerMsgAI(_PluginBase):
             if not event_info:
                 return
 
-            logger.info(f"收到Webhook事件: {event_info.event}, 媒体: {event_info.item_name}, 服务器: {event_info.server_name}")
+            logger.debug(f"收到Webhook事件: {event_info.event}, 媒体: {event_info.item_name}, 服务器: {event_info.server_name}")
             logger.debug(f"Webhook原始数据: {json.dumps(event_info.json_object, ensure_ascii=False) if event_info.json_object else 'None'}")
 
             # 事件类型检查（统一转小写，兼容 Jellyfin/Plex 大小写差异）
