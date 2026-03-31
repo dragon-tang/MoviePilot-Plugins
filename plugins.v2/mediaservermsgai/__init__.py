@@ -50,7 +50,7 @@ class MediaServerMsgAI(_PluginBase):
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "2.0.4"
+    plugin_version = "2.0.5"
     plugin_author = "dragon-tang"
     author_url = "https://github.com/dragon-tang"
     plugin_config_prefix = "mediaservermsgai_"
@@ -115,6 +115,8 @@ class MediaServerMsgAI(_PluginBase):
         self._series_tmdb_inflight = set()
         self._webhook_actions_lower: frozenset = frozenset()
         self._allowed_event_types: frozenset = frozenset()
+        self._last_event_snapshot: Dict[str, str] = {}
+        self._last_notification_snapshot: Dict[str, str] = {}
 
     @staticmethod
     def _safe_int(value: Any, default: int, min_value: Optional[int] = None, max_value: Optional[int] = None) -> int:
@@ -298,18 +300,154 @@ class MediaServerMsgAI(_PluginBase):
             }
         ], {
             "enabled": False,
+            "add_play_link": False,
+            "mediaservers": [],
             "types": [],
             "aggregate_enabled": False,
             "aggregate_time": self.DEFAULT_AGGREGATE_TIME,
             "smart_category_enabled": True,
             "filter_unrecognized": True,
             "path_skip_keywords": "",
-            "overview_max_length": 150,
+            "overview_max_length": self.DEFAULT_OVERVIEW_MAX_LENGTH,
             "emby_image_host": ""
         }
 
     def get_page(self) -> List[dict]:
-        return []
+        configured_event_count = len(self._allowed_event_types) if self._allowed_event_types else sum(
+            1 for event_group in (self._types or []) for event_name in str(event_group).split("|") if event_name
+        )
+        mediaservers = "、".join(self._mediaservers or [])
+        with self._lock:
+            last_event_snapshot = dict(self._last_event_snapshot)
+            last_notification_snapshot = dict(self._last_notification_snapshot)
+            pending_series_count = len(self._pending_messages)
+            image_cache_count = len(self._image_cache)
+
+        status_lines = [
+            f"运行状态：{'已启用' if self._enabled else '未启用'}",
+            f"媒体服务器：{self._short_page_text(mediaservers, 80, '未选择')}",
+            f"事件类型数：{configured_event_count}",
+            f"播放链接：{'开启' if self._add_play_link else '关闭'}",
+            f"剧集聚合：{'开启' if self._aggregate_enabled else '关闭'}（{self._aggregate_time} 秒）",
+            f"智能分类：{'开启' if self._smart_category_enabled else '关闭'}",
+            f"未识别过滤：{'开启' if self._filter_unrecognized else '关闭'}",
+            f"聚合队列：{pending_series_count}",
+            f"图片缓存：{image_cache_count}",
+        ]
+
+        if last_event_snapshot:
+            event_lines = [
+                f"时间：{last_event_snapshot.get('time', '-')}",
+                f"事件：{last_event_snapshot.get('action', '-')}",
+                f"原始类型：{last_event_snapshot.get('event', '-')}",
+                f"服务器：{last_event_snapshot.get('server', '-')}",
+                f"媒体：{last_event_snapshot.get('media', '-')}",
+                f"媒体类型：{last_event_snapshot.get('item_type', '-')}",
+                f"用户：{last_event_snapshot.get('user', '-')}",
+                f"设备：{last_event_snapshot.get('device', '-')}",
+                f"TMDB：{last_event_snapshot.get('tmdb_id', '-')}",
+                f"路径：{last_event_snapshot.get('path', '-')}",
+            ]
+        else:
+            event_lines = [
+                "暂无已处理事件",
+                "提示：详情页展示当前进程内最近一次成功处理的事件。",
+            ]
+
+        if last_notification_snapshot:
+            notification_lines = [
+                f"时间：{last_notification_snapshot.get('time', '-')}",
+                f"标题：{last_notification_snapshot.get('title', '-')}",
+                f"内容：{last_notification_snapshot.get('text', '-')}",
+                f"图片：{last_notification_snapshot.get('image', '-')}",
+                f"播放链接：{last_notification_snapshot.get('link', '-')}",
+            ]
+        else:
+            notification_lines = [
+                "暂无通知发送记录",
+                "提示：当插件发送通知后，这里会展示最近一次通知摘要。",
+            ]
+
+        return [{
+            'component': 'VRow',
+            'content': [
+                {
+                    'component': 'VCol',
+                    'props': {'cols': 12, 'md': 4},
+                    'content': [self._build_page_card('插件状态', status_lines)]
+                },
+                {
+                    'component': 'VCol',
+                    'props': {'cols': 12, 'md': 4},
+                    'content': [self._build_page_card('最近事件', event_lines)]
+                },
+                {
+                    'component': 'VCol',
+                    'props': {'cols': 12, 'md': 4},
+                    'content': [self._build_page_card('最近通知', notification_lines)]
+                }
+            ]
+        }]
+
+    @staticmethod
+    def _short_page_text(value: Any, limit: int = 120, default: str = '-') -> str:
+        text = str(value).strip() if value is not None else ''
+        if not text:
+            return default
+        if len(text) > limit:
+            return text[:limit].rstrip() + '...'
+        return text
+
+    def _build_page_card(self, title: str, lines: List[str]) -> dict:
+        return {
+            'component': 'VCard',
+            'content': [
+                {'component': 'VCardTitle', 'text': title},
+                *[
+                    {
+                        'component': 'VCardText',
+                        'props': {'class': 'py-1'},
+                        'text': line
+                    }
+                    for line in lines
+                ]
+            ]
+        }
+
+    def _set_last_event_snapshot(self, event_info: WebhookEventInfo):
+        item_path = event_info.item_path or ''
+        if not item_path and event_info.json_object:
+            item_path = event_info.json_object.get('Item', {}).get('Path', '')
+        event_name = str(event_info.event) if event_info.event is not None else ''
+        snapshot = {
+            'time': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()),
+            'event': self._short_page_text(event_name, 80, '未知事件'),
+            'action': self._short_page_text(
+                self._webhook_actions.get(event_name) or self._webhook_actions.get(event_name.lower()),
+                80,
+                '通知'
+            ),
+            'server': self._short_page_text(self._get_server_name_cn(event_info), 80, '媒体服务器'),
+            'media': self._short_page_text(event_info.item_name, 120, '未知媒体'),
+            'item_type': self._short_page_text(event_info.item_type, 40, '-'),
+            'user': self._short_page_text(event_info.user_name, 80, '-'),
+            'device': self._short_page_text(event_info.device_name, 80, '-'),
+            'tmdb_id': self._short_page_text(event_info.tmdb_id, 40, '-'),
+            'path': self._short_page_text(item_path, 160, '-'),
+        }
+        with self._lock:
+            self._last_event_snapshot = snapshot
+
+    def _set_last_notification_snapshot(self, title: str, text: str, image: Optional[str] = None, link: Optional[str] = None):
+        snapshot = {
+            'time': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()),
+            'title': self._short_page_text(title, 120, '-'),
+            'text': self._short_page_text(text, 220, '-'),
+            'image': self._short_page_text(image, 120, '无'),
+            'link': self._short_page_text(link, 120, '无'),
+        }
+        with self._lock:
+            self._last_notification_snapshot = snapshot
 
     @eventmanager.register(EventType.WebhookMessage)
     def send(self, event: Event):
@@ -356,6 +494,8 @@ class MediaServerMsgAI(_PluginBase):
                                 return
 
             # 根据事件类型分发处理
+            self._set_last_event_snapshot(event_info)
+
             if "test" in event_lower:
                 self._handle_test_event(event_info)
                 return
@@ -450,6 +590,7 @@ class MediaServerMsgAI(_PluginBase):
 
         if tmdb_id:
             event_info.tmdb_id = tmdb_id
+        self._set_last_event_snapshot(event_info)
         image_url = event_info.image_url
         if not image_url and tmdb_id:
             mtype = MediaType.MOVIE if event_info.item_type == "MOV" else MediaType.TV
@@ -634,6 +775,7 @@ class MediaServerMsgAI(_PluginBase):
     # ==================== 公共辅助方法 ====================
 
     def _send_notification(self, title: str, text: str, image: Optional[str] = None, link: Optional[str] = None):
+        self._set_last_notification_snapshot(title=title, text=text, image=image, link=link)
         self.post_message(
             mtype=NotificationType.MediaServer,
             title=title,
@@ -948,7 +1090,7 @@ class MediaServerMsgAI(_PluginBase):
             response.raise_for_status()
             return response
         except Exception as e:
-            logger.debug(f"HTTP请求失败: {url} - {str(e)}")
+            logger.debug(f"HTTP请求失败: {type(e).__name__}: {str(e)}")
             return None
 
     def _http_get_json(self, url: str, timeout: int = 5) -> Optional[dict]:
@@ -1248,7 +1390,6 @@ class MediaServerMsgAI(_PluginBase):
                 image=image_url,
                 link=link
             )
-
         except Exception as e:
             logger.error(f"发送单曲通知失败: {str(e)}")
 
