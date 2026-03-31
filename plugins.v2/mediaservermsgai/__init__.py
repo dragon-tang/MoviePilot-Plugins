@@ -4,7 +4,6 @@ import time
 import traceback
 import threading
 import os
-import urllib.parse
 from collections import OrderedDict
 from typing import Any, List, Dict, Tuple, Optional
 
@@ -40,13 +39,18 @@ class MediaServerMsgAI(_PluginBase):
     DEFAULT_EXPIRATION_TIME = 600
     DEFAULT_AGGREGATE_TIME = 15
     DEFAULT_OVERVIEW_MAX_LENGTH = 150
+    MIN_AGGREGATE_TIME = 1
+    MIN_OVERVIEW_MAX_LENGTH = 20
     IMAGE_CACHE_MAX_SIZE = 100
+    IMAGE_NEGATIVE_CACHE_TTL = 300
+    SERIES_TMDB_CACHE_TTL = 3600
+    SERIES_TMDB_NEGATIVE_CACHE_TTL = 300
 
     # ==================== 插件基本信息 ====================
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "2.0.3"
+    plugin_version = "2.0.4"
     plugin_author = "dragon-tang"
     author_url = "https://github.com/dragon-tang"
     plugin_config_prefix = "mediaservermsgai_"
@@ -96,6 +100,7 @@ class MediaServerMsgAI(_PluginBase):
         self._lock = threading.Lock()
         self._last_event_cache: Tuple[Optional[Event], float] = (None, 0.0)
         self._image_cache = OrderedDict()
+        self._http_session = requests.Session()
         self._overview_max_length = self.DEFAULT_OVERVIEW_MAX_LENGTH
         self._filter_unrecognized = True
         self._path_skip_keywords = []
@@ -106,7 +111,22 @@ class MediaServerMsgAI(_PluginBase):
         self._aggregate_timers = {}
         self._smart_category_enabled = True
         self._service_infos_cache: Tuple[Optional[Dict], float] = (None, 0.0)
+        self._series_tmdb_cache = {}
+        self._series_tmdb_inflight = set()
         self._webhook_actions_lower: frozenset = frozenset()
+        self._allowed_event_types: frozenset = frozenset()
+
+    @staticmethod
+    def _safe_int(value: Any, default: int, min_value: Optional[int] = None, max_value: Optional[int] = None) -> int:
+        try:
+            result = int(value)
+        except (TypeError, ValueError):
+            result = default
+        if min_value is not None:
+            result = max(min_value, result)
+        if max_value is not None:
+            result = min(max_value, result)
+        return result
 
     def init_plugin(self, config: dict = None):
         # 重置运行时状态，防止重新配置后旧 timer/缓存残留
@@ -114,20 +134,35 @@ class MediaServerMsgAI(_PluginBase):
         if self.category is None:
             self.category = CategoryHelper()
         self._webhook_actions_lower = frozenset(k.lower() for k in self._webhook_actions)
+        self._allowed_event_types = frozenset()
         if config:
             self._enabled = config.get("enabled")
             self._types = config.get("types") or []
             self._mediaservers = config.get("mediaservers") or []
             self._add_play_link = config.get("add_play_link", False)
-            self._overview_max_length = int(config.get("overview_max_length", self.DEFAULT_OVERVIEW_MAX_LENGTH))
+            self._overview_max_length = self._safe_int(
+                config.get("overview_max_length", self.DEFAULT_OVERVIEW_MAX_LENGTH),
+                self.DEFAULT_OVERVIEW_MAX_LENGTH,
+                min_value=self.MIN_OVERVIEW_MAX_LENGTH,
+            )
             self._aggregate_enabled = config.get("aggregate_enabled", False)
-            self._aggregate_time = int(config.get("aggregate_time", self.DEFAULT_AGGREGATE_TIME))
+            self._aggregate_time = self._safe_int(
+                config.get("aggregate_time", self.DEFAULT_AGGREGATE_TIME),
+                self.DEFAULT_AGGREGATE_TIME,
+                min_value=self.MIN_AGGREGATE_TIME,
+            )
             self._smart_category_enabled = config.get("smart_category_enabled", True)
             self._filter_unrecognized = config.get("filter_unrecognized", True)
             path_skip_keywords_raw = config.get("path_skip_keywords", "")
             self._path_skip_keywords = [
-                kw.strip() for kw in path_skip_keywords_raw.splitlines() if kw.strip()
+                kw.strip().lower() for kw in path_skip_keywords_raw.splitlines() if kw.strip()
             ]
+            self._allowed_event_types = frozenset(
+                t.lower()
+                for event_group in self._types
+                for t in str(event_group).split("|")
+                if t
+            )
             self._emby_image_host = config.get("emby_image_host", "").rstrip("/")
             logger.info(f"插件配置初始化完成: 启用={self._enabled}, 聚合={self._aggregate_enabled}({self._aggregate_time}s), "
                         f"智能分类={self._smart_category_enabled}, TMDB过滤={self._filter_unrecognized}")
@@ -244,7 +279,7 @@ class MediaServerMsgAI(_PluginBase):
                     {
                         'component': 'VRow',
                         'content': [
-                            {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VTextarea', 'props': {'model': 'path_skip_keywords', 'label': '路径关键词黑名单（跳过TMDB识别）', 'placeholder': '每行一个关键词，Path包含任意关键词时跳过TMDB识别\n例如：\n日本有\n日本无', 'rows': 4, 'hint': '命中关键词的媒体不会进行TMDB识别，若同时开启「未识别过滤」则也不会发送通知'}}]}
+                            {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VTextarea', 'props': {'model': 'path_skip_keywords', 'label': '路径关键词黑名单（跳过TMDB识别）', 'placeholder': '每行一个关键词，Path包含任意关键词时跳过TMDB识别\n例如：\n日本有码\n日本无码', 'rows': 4, 'hint': '命中关键词的媒体不会进行TMDB识别，若同时开启「未识别过滤」则也不会发送通知'}}]}
                         ]
                     },
                     {
@@ -297,11 +332,7 @@ class MediaServerMsgAI(_PluginBase):
                 return
 
             # 类型过滤
-            allowed_types = set()
-            for _type in self._types:
-                allowed_types.update(t.lower() for t in _type.split("|"))
-
-            if event_lower not in allowed_types:
+            if event_lower not in self._allowed_event_types:
                 logger.debug(f"未开启 {event_info.event} 类型的消息通知")
                 return
 
@@ -369,8 +400,7 @@ class MediaServerMsgAI(_PluginBase):
         if event_info.user_name:
             texts.append(f"用户：{event_info.user_name}")
 
-        self.post_message(
-            mtype=NotificationType.MediaServer,
+        self._send_notification(
             title="🔔 媒体服务器通知测试",
             text="\n".join(texts),
             image=self._webhook_images.get(event_info.channel)
@@ -397,8 +427,7 @@ class MediaServerMsgAI(_PluginBase):
 
         texts.append(f"🖥️ 服务器：{self._get_server_name_cn(event_info)}")
 
-        self.post_message(
-            mtype=NotificationType.MediaServer,
+        self._send_notification(
             title=f"🔐 {action}提醒",
             text="\n".join(texts),
             image=self._webhook_images.get(event_info.channel)
@@ -426,8 +455,7 @@ class MediaServerMsgAI(_PluginBase):
             mtype = MediaType.MOVIE if event_info.item_type == "MOV" else MediaType.TV
             image_url = self._get_tmdb_image(event_info, mtype)
 
-        self.post_message(
-            mtype=NotificationType.MediaServer,
+        self._send_notification(
             title=f"⭐ 用户评分：{event_info.item_name}",
             text="\n".join(texts),
             image=image_url or self._webhook_images.get(event_info.channel)
@@ -479,8 +507,7 @@ class MediaServerMsgAI(_PluginBase):
             for path in mount_paths:
                 texts.append(f"• {path}")
 
-        self.post_message(
-            mtype=NotificationType.MediaServer,
+        self._send_notification(
             title="🗑️ 神医助手 - 媒体深度删除",
             text="\n" + "\n".join(texts),
             image=None
@@ -512,7 +539,8 @@ class MediaServerMsgAI(_PluginBase):
             _raw_path = event_info.item_path or ""
             if not _raw_path and event_info.json_object:
                 _raw_path = event_info.json_object.get('Item', {}).get('Path', '')
-            _path_blocked = any(kw in _raw_path for kw in self._path_skip_keywords) if (self._path_skip_keywords and _raw_path) else False
+            _path_for_match = _raw_path.lower() if _raw_path else ""
+            _path_blocked = any(kw in _path_for_match for kw in self._path_skip_keywords) if (self._path_skip_keywords and _path_for_match) else False
 
             tmdb_id = self._extract_tmdb_id(event_info, item_path=_raw_path)
             event_info.tmdb_id = tmdb_id
@@ -593,8 +621,7 @@ class MediaServerMsgAI(_PluginBase):
             if "library.new" in ev_lower:
                 message_text = "\n" + message_text
 
-            self.post_message(
-                mtype=NotificationType.MediaServer,
+            self._send_notification(
                 title=message_title,
                 text=message_text,
                 image=image_url,
@@ -606,9 +633,18 @@ class MediaServerMsgAI(_PluginBase):
 
     # ==================== 公共辅助方法 ====================
 
+    def _send_notification(self, title: str, text: str, image: Optional[str] = None, link: Optional[str] = None):
+        self.post_message(
+            mtype=NotificationType.MediaServer,
+            title=title,
+            text=text,
+            image=image,
+            link=link
+        )
+
     def _build_title_name(self, tmdb_info, event_info: WebhookEventInfo) -> str:
         """构建带年份的标题名称"""
-        title_name = tmdb_info.title if (tmdb_info and tmdb_info.title) else event_info.item_name
+        title_name = (tmdb_info.title if (tmdb_info and tmdb_info.title) else event_info.item_name) or "未知媒体"
         year = tmdb_info.year if (tmdb_info and tmdb_info.year) else (
             event_info.json_object.get('Item', {}).get('ProductionYear') if event_info.json_object else None
         )
@@ -722,6 +758,9 @@ class MediaServerMsgAI(_PluginBase):
         count = len(events_info)
 
         tmdb_id = self._extract_tmdb_id(first_info)
+        if not tmdb_id:
+            series_id = self._get_series_id(first_info)
+            tmdb_id = self._get_series_tmdb_cache(series_id) if series_id else None
         first_info.tmdb_id = tmdb_id
 
         tmdb_info = None
@@ -731,7 +770,7 @@ class MediaServerMsgAI(_PluginBase):
             except Exception as e:
                 logger.error(f"识别TMDB信息异常: {str(e)}")
 
-        title_name = first_info.item_name
+        title_name = first_info.item_name or "未知媒体"
         if first_info.json_object:
             title_name = first_info.json_object.get('Item', {}).get('SeriesName') or title_name
 
@@ -770,8 +809,7 @@ class MediaServerMsgAI(_PluginBase):
 
         play_link = self._get_play_link(first_info)
 
-        self.post_message(
-            mtype=NotificationType.MediaServer,
+        self._send_notification(
             title=message_title,
             text="\n" + "\n".join(message_texts),
             image=image_url,
@@ -832,8 +870,9 @@ class MediaServerMsgAI(_PluginBase):
             if not item_path and event_info.json_object:
                 item_path = event_info.json_object.get('Item', {}).get('Path', '')
         if self._path_skip_keywords and item_path:
-            if any(kw in item_path for kw in self._path_skip_keywords):
-                logger.info(f"路径命中黑名单，跳过TMDB识别: {item_path}")
+            item_path_lower = item_path.lower()
+            if any(kw in item_path_lower for kw in self._path_skip_keywords):
+                logger.info(f"路径呾�命中黑名单，跳过TMDB识别: {item_path}")
                 return None
 
         if event_info.tmdb_id:
@@ -850,6 +889,27 @@ class MediaServerMsgAI(_PluginBase):
 
         return None
 
+    def _get_series_tmdb_cache(self, series_id: str) -> Optional[str]:
+        if not series_id:
+            return None
+        now = time.time()
+        with self._lock:
+            cached = self._series_tmdb_cache.get(series_id)
+            if not cached:
+                return None
+            tmdb_id, expires_at = cached
+            if expires_at <= now:
+                self._series_tmdb_cache.pop(series_id, None)
+                return None
+            return tmdb_id
+
+    def _set_series_tmdb_cache(self, series_id: str, tmdb_id: Optional[str]):
+        if not series_id:
+            return
+        ttl = self.SERIES_TMDB_CACHE_TTL if tmdb_id else self.SERIES_TMDB_NEGATIVE_CACHE_TTL
+        with self._lock:
+            self._series_tmdb_cache[series_id] = (tmdb_id, time.time() + ttl)
+
     def _extract_tmdb_id(self, event_info: WebhookEventInfo, item_path: str = None) -> Optional[str]:
         """提取TMDB ID。
         先从本地数据查找；若为剧集且本地无结果，启动后台线程从 API 补全（写回 event_info.tmdb_id）。
@@ -858,51 +918,85 @@ class MediaServerMsgAI(_PluginBase):
         if tmdb_id:
             return tmdb_id
 
-        # 对 Episode 类型启动异步 API 补全，结果写回 event_info 供后续使用
         if event_info.json_object:
             item_data = event_info.json_object.get('Item', {})
             series_id = item_data.get('SeriesId')
             if series_id and item_data.get('Type') == 'Episode':
-                t = threading.Thread(
-                    target=self._fetch_series_tmdb_id_async,
-                    args=(event_info,),
-                    daemon=True
-                )
-                t.start()
+                cached_tmdb_id = self._get_series_tmdb_cache(series_id)
+                if cached_tmdb_id:
+                    event_info.tmdb_id = cached_tmdb_id
+                    return cached_tmdb_id
+
+                should_fetch = False
+                with self._lock:
+                    if series_id not in self._series_tmdb_inflight:
+                        self._series_tmdb_inflight.add(series_id)
+                        should_fetch = True
+                if should_fetch:
+                    t = threading.Thread(
+                        target=self._fetch_series_tmdb_id_async,
+                        args=(event_info, series_id),
+                        daemon=True
+                    )
+                    t.start()
 
         return None
 
-    def _fetch_series_tmdb_id_async(self, event_info):
-        """后台线程：从媒体服务器 API 查询剧集系列的 TMDB ID 并写回 event_info"""
+    def _http_get(self, url: str, timeout: int = 5) -> Optional[requests.Response]:
+        try:
+            response = self._http_session.get(url, timeout=timeout)
+            response.raise_for_status()
+            return response
+        except Exception as e:
+            logger.debug(f"HTTP请求失败: {url} - {str(e)}")
+            return None
+
+    def _http_get_json(self, url: str, timeout: int = 5) -> Optional[dict]:
+        response = self._http_get(url, timeout=timeout)
+        if not response:
+            return None
+        try:
+            return response.json()
+        except ValueError as e:
+            logger.debug(f"HTTP响应JSON解析失败: {url} - {str(e)}")
+            return None
+
+    def _fetch_series_tmdb_id_async(self, event_info, series_id: str):
+        """后台线程：从媒体服务器 API 查询剧集系列的 TMDB ID，写入共享缓存并回填当前 event_info"""
         try:
             if not self._enabled:
                 return
-            item_data = event_info.json_object.get('Item', {})
-            series_id = item_data.get('SeriesId')
             if not series_id:
                 return
             service = self.service_info(event_info.server_name)
             if not service:
+                self._set_series_tmdb_cache(series_id, None)
                 return
             host = service.config.config.get('host')
             apikey = service.config.config.get('apikey')
             if not host or not apikey:
+                self._set_series_tmdb_cache(series_id, None)
                 return
             api_path = self._get_api_path(event_info.server_name)
             if api_path is None:
+                self._set_series_tmdb_cache(series_id, None)
                 return
             api_url = f"{host}{api_path}/Items?Ids={series_id}&Fields=ProviderIds&api_key={apikey}"
-            res = requests.get(api_url, timeout=5)
-            if res.status_code == 200:
-                data = res.json()
-                if data and data.get('Items'):
-                    parent_ids = data['Items'][0].get('ProviderIds', {})
-                    tmdb_id = parent_ids.get('Tmdb')
-                    if tmdb_id:
-                        event_info.tmdb_id = tmdb_id
-                        logger.debug(f"异步获取系列 TMDB ID 成功: {tmdb_id}")
+            data = self._http_get_json(api_url, timeout=5)
+            tmdb_id = None
+            if data and data.get('Items'):
+                parent_ids = data['Items'][0].get('ProviderIds', {})
+                tmdb_id = parent_ids.get('Tmdb')
+            if tmdb_id:
+                event_info.tmdb_id = tmdb_id
+                logger.debug(f"异步获取系列 TMDB ID 成功: {tmdb_id}")
+            self._set_series_tmdb_cache(series_id, tmdb_id)
         except Exception as e:
+            self._set_series_tmdb_cache(series_id, None)
             logger.debug(f"异步获取系列 TMDB ID 异常: {str(e)}")
+        finally:
+            with self._lock:
+                self._series_tmdb_inflight.discard(series_id)
 
     def _get_api_path(self, server_name: str) -> Optional[str]:
         """根据服务器类型返回 API 路径前缀。
@@ -999,14 +1093,25 @@ class MediaServerMsgAI(_PluginBase):
             pass
         return None
 
+    def _cache_image_result(self, key: str, image_url: Optional[str]):
+        expires_at = 0 if image_url else time.time() + self.IMAGE_NEGATIVE_CACHE_TTL
+        with self._lock:
+            self._image_cache[key] = (image_url, expires_at)
+            if len(self._image_cache) > self.IMAGE_CACHE_MAX_SIZE:
+                self._image_cache.popitem(last=False)
+
     def _get_tmdb_image(self, event_info: WebhookEventInfo, mtype: MediaType) -> Optional[str]:
         """获取TMDB图片（带OrderedDict LRU缓存）"""
         key = f"{event_info.tmdb_id}_{event_info.season_id}_{event_info.episode_id}"
 
         with self._lock:
-            if key in self._image_cache:
+            cached = self._image_cache.get(key)
+            if cached:
                 self._image_cache.move_to_end(key)
-                return self._image_cache[key]
+                image_url, expires_at = cached
+                if image_url or expires_at > time.time():
+                    return image_url
+                self._image_cache.pop(key, None)
 
         try:
             img = self.chain.obtain_specific_image(
@@ -1022,14 +1127,11 @@ class MediaServerMsgAI(_PluginBase):
                     season=event_info.season_id, episode=event_info.episode_id
                 )
 
-            if img:
-                with self._lock:
-                    self._image_cache[key] = img
-                    if len(self._image_cache) > self.IMAGE_CACHE_MAX_SIZE:
-                        self._image_cache.popitem(last=False)
-                return img
+            self._cache_image_result(key, img)
+            return img
 
         except Exception as e:
+            self._cache_image_result(key, None)
             logger.error(f"获取TMDB图片异常: {str(e)}")
 
         return None
@@ -1095,18 +1197,17 @@ class MediaServerMsgAI(_PluginBase):
             fields = "Path,MediaStreams,Container,Size,RunTimeTicks,ImageTags,ProviderIds"
             api_url = f"{base_url}{api_path}/Items?ParentId={album_id}&Fields={fields}&api_key={api_key}"
 
-            res = requests.get(api_url, timeout=10)
-            if res.status_code == 200:
-                items = res.json().get('Items', [])
-                logger.info(f"专辑 [{album_name}] 包含 {len(items)} 首歌曲")
-                for song in items:
-                    self._send_single_audio_notify(
-                        song, album_name, album_artist,
-                        primary_image_item_id, primary_image_tag,
-                        base_url, event_info.server_name
-                    )
-            else:
-                logger.error(f"请求专辑歌曲失败，状态码: {res.status_code}")
+            data = self._http_get_json(api_url, timeout=10)
+            if not data:
+                return
+            items = data.get('Items', [])
+            logger.info(f"专辑 [{album_name}] 包含 {len(items)} 首歌曲")
+            for song in items:
+                self._send_single_audio_notify(
+                    song, album_name, album_artist,
+                    primary_image_item_id, primary_image_tag,
+                    base_url, event_info.server_name
+                )
 
         except Exception as e:
             logger.error(f"处理音乐专辑失败: {str(e)}\n{traceback.format_exc()}")
@@ -1141,8 +1242,7 @@ class MediaServerMsgAI(_PluginBase):
             if self._add_play_link:
                 link = f"{base_url}/web/index.html#!/item?id={song_id}&serverId={song.get('ServerId', '')}"
 
-            self.post_message(
-                mtype=NotificationType.MediaServer,
+            self._send_notification(
                 title=f"🎵 新入库媒体：{song_name}",
                 text="\n" + "\n".join(texts),
                 image=image_url,
@@ -1199,7 +1299,7 @@ class MediaServerMsgAI(_PluginBase):
             except Exception:
                 texts.append(f"🌐 IP：{event_info.ip}")
 
-        if event_info.percentage:
+        if event_info.percentage is not None:
             percentage = round(float(event_info.percentage), 2)
             texts.append(f"📊 进度：{percentage}%")
 
@@ -1276,6 +1376,10 @@ class MediaServerMsgAI(_PluginBase):
                 self._webhook_msg_keys.clear()
                 self._image_cache.clear()
                 self._service_infos_cache = (None, 0.0)
+                self._series_tmdb_cache.clear()
+                self._series_tmdb_inflight.clear()
+            self._http_session.close()
+            self._http_session = requests.Session()
             if pending_snapshot or has_timers:
                 logger.info("插件清理完成")
         except Exception as e:
