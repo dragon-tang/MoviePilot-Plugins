@@ -409,12 +409,6 @@ class MediaServerMsgAI(_PluginBase):
                                             {'component': 'div', 'props': {'class': 'text-subtitle-1 font-weight-bold mb-2'}, 'text': last_notify.get('title', '暂无通知')},
                                             {'component': 'div', 'props': {'class': 'text-caption', 'style': 'white-space: pre-line'}, 'text': last_notify.get('text', '-')}
                                         ]
-                                    },
-                                    {
-                                        'component': 'VCardActions',
-                                        'content': [
-                                            {'component': 'VBtn', 'props': {'variant': 'text', 'color': 'primary', 'size': 'small', 'href': last_notify.get('link'), 'target': '_blank', 'disabled': not last_notify.get('link')}, 'text': '跳转播放'}
-                                        ]
                                     }
                                 ]
                             }
@@ -571,7 +565,7 @@ class MediaServerMsgAI(_PluginBase):
                                 return
 
             # 根据事件类型分发处理
-            self._set_last_event_snapshot(event_info)
+            # self._set_last_event_snapshot(event_info)
 
             if "test" in event_lower:
                 self._handle_test_event(event_info)
@@ -762,6 +756,7 @@ class MediaServerMsgAI(_PluginBase):
 
             tmdb_id = self._extract_tmdb_id(event_info, item_path=_raw_path)
             event_info.tmdb_id = tmdb_id
+            self._set_last_event_snapshot(event_info)
 
             message_texts = []
             message_title = ""
@@ -981,6 +976,7 @@ class MediaServerMsgAI(_PluginBase):
             series_id = self._get_series_id(first_info)
             tmdb_id = self._get_series_tmdb_cache(series_id) if series_id else None
         first_info.tmdb_id = tmdb_id
+        self._set_last_event_snapshot(first_info)
 
         tmdb_info = None
         if tmdb_id:
