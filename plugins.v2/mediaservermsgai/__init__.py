@@ -315,60 +315,83 @@ class MediaServerMsgAI(_PluginBase):
         }
 
     def get_page(self) -> List[dict]:
+        # 1. 基础数据准备
         with self._lock:
             last_event = dict(self._last_event_snapshot)
             last_notify = dict(self._last_notification_snapshot)
             history = list(self._event_history or [])
+            cache_count = len(self._image_cache)
+            
+        status_color = "success" if self._enabled else "error"
+        status_text = "运行中" if self._enabled else "已停止"
 
         return [
-            # 第一行：3个统计卡片 (删掉聚合队列)
+            # --- 第一行：三个顶部统计卡片 ---
             {
                 'component': 'VRow',
                 'content': [
-                    self._build_stat_card("插件状态", "运行中" if self._enabled else "已停止", "mdi-play-circle", "success" if self._enabled else "error"),
+                    self._build_stat_card("插件状态", status_text, "mdi-play-circle", status_color),
                     self._build_stat_card("累计处理次数", str(self._total_events), "mdi-history", "primary"),
-                    self._build_stat_card("TMDB 图片缓存", str(len(self._image_cache)), "mdi-image-multiple", "info"),
+                    self._build_stat_card("TMDB 图片缓存", str(cache_count), "mdi-image-multiple", "info"),
                 ]
             },
-            # 第二行：主内容布局
+            # --- 第二行：主体区域 (左侧复合 + 右侧预览) ---
             {
                 'component': 'VRow',
                 'content': [
-                    # 左侧复合区 (md=8)
+                    # 左侧复合区 (占 8/12 宽度)
                     {
                         'component': 'VCol',
                         'props': {'cols': 12, 'md': 8},
                         'content': [
+                            # 内部嵌套行：核心配置 + 最新事件
                             {
                                 'component': 'VRow',
                                 'content': [
-                                    # 配置卡片 (一半宽)
-                                    {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [
-                                        {'component': 'VCard', 'content': [
-                                            {'component': 'VCardTitle', 'text': '🛠️ 核心配置'},
-                                            {'component': 'VCardText', 'content': [
-                                                self._render_info_item("媒体服务器", "、".join(self._mediaservers or ["未选择"])),
-                                                self._render_info_item("剧集聚合", f"{self._aggregate_time}s" if self._aggregate_enabled else "已禁用"),
-                                                self._render_info_item("智能分类", "✅ 开启" if self._smart_category_enabled else "❌ 关闭"),
-                                                self._render_info_item("未识别过滤", "🛡️ 开启" if self._filter_unrecognized else "🔓 关闭"),
-                                            ]}
-                                        ]}
-                                    ]},
-                                    # 最新事件卡片 (一半宽)
-                                    {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [
-                                        {'component': 'VCard', 'content': [
-                                            {'component': 'VCardTitle', 'text': '📡 最新事件'},
-                                            {'component': 'VCardText', 'content': self._build_event_detail(last_event)}
-                                        ]}
-                                    ]},
+                                    # 核心配置 (Box 4)
+                                    {
+                                        'component': 'VCol',
+                                        'props': {'cols': 12, 'md': 6},
+                                        'content': [
+                                            {
+                                                'component': 'VCard',
+                                                'content': [
+                                                    {'component': 'VCardTitle', 'text': '🛠️ 核心配置'},
+                                                    {'component': 'VDivider'},
+                                                    {'component': 'VCardText', 'content': [
+                                                        self._render_info_item("媒体服务器", "、".join(self._mediaservers or ["未选择"])),
+                                                        self._render_info_item("剧集聚合", f"{self._aggregate_time}s" if self._aggregate_enabled else "已禁用"),
+                                                        self._render_info_item("智能分类", "✅ 开启" if self._smart_category_enabled else "❌ 关闭"),
+                                                        self._render_info_item("未识别过滤", "🛡️ 开启" if self._filter_unrecognized else "🔓 关闭"),
+                                                    ]}
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    # 最新事件 (Box 5)
+                                    {
+                                        'component': 'VCol',
+                                        'props': {'cols': 12, 'md': 6},
+                                        'content': [
+                                            {
+                                                'component': 'VCard',
+                                                'content': [
+                                                    {'component': 'VCardTitle', 'text': '📡 最新事件'},
+                                                    {'component': 'VDivider'},
+                                                    {'component': 'VCardText', 'content': self._build_event_detail(last_event)}
+                                                ]
+                                            }
+                                        ]
+                                    }
                                 ]
                             },
-                            # 下方新增：处理历史表格，完美填补空白
+                            # 处理历史 (Box 6) - 位于配置和事件下方
                             {
                                 'component': 'VCard',
                                 'props': {'class': 'mt-4'},
                                 'content': [
                                     {'component': 'VCardTitle', 'text': '📜 处理历史 (最近5条)'},
+                                    {'component': 'VDivider'},
                                     {
                                         'component': 'VTable',
                                         'props': {'density': 'compact'},
@@ -381,11 +404,13 @@ class MediaServerMsgAI(_PluginBase):
                                             ]}]},
                                             {'component': 'tbody', 'content': [
                                                 {'component': 'tr', 'content': [
-                                                    {'component': 'td', 'text': h.get('time', '')[11:]}, # 只显示时间部分
-                                                    {'component': 'td', 'text': h.get('action', '')},
-                                                    {'component': 'td', 'props': {'class': 'text-truncate', 'style': 'max-width: 200px'}, 'text': h.get('media', '')},
-                                                    {'component': 'td', 'text': '✅ 已处理'}
+                                                    {'component': 'td', 'text': h.get('time', '')[11:]}, # 只截取时间
+                                                    {'component': 'td', 'text': h.get('action', '通知')},
+                                                    {'component': 'td', 'props': {'class': 'text-truncate', 'style': 'max-width: 200px'}, 'text': h.get('media', '-')},
+                                                    {'component': 'td', 'content': [{'component': 'VChip', 'props': {'color': 'success', 'size': 'x-small', 'variant': 'flat'}, 'text': '已处理'}]}
                                                 ]} for h in history
+                                            ] if history else [
+                                                {'component': 'tr', 'content': [{'component': 'td', 'props': {'colspan': 4, 'class': 'text-center text-grey pa-4'}, 'text': '暂无历史记录'}]}
                                             ]}
                                         ]
                                     }
@@ -393,19 +418,36 @@ class MediaServerMsgAI(_PluginBase):
                             }
                         ]
                     },
-                    # 右侧通知预览 (md=4)
+                    # 右侧预览区 (Box 7) - 占 4/12 宽度，垂直铺满
                     {
                         'component': 'VCol',
                         'props': {'cols': 12, 'md': 4},
                         'content': [
-                            {'component': 'VCard', 'content': [
-                                {'component': 'VCardTitle', 'text': '🔔 通知预览'},
-                                {'component': 'VImg', 'props': {'src': last_notify.get('image'), 'height': '180', 'cover': True, 'show': bool(last_notify.get('image'))}},
-                                {'component': 'VCardText', 'content': [
-                                    {'component': 'div', 'props': {'class': 'text-subtitle-2 font-weight-bold mb-1'}, 'text': last_notify.get('title', '等待中')},
-                                    {'component': 'div', 'props': {'class': 'text-caption'}, 'text': last_notify.get('text', '-')}
-                                ]}
-                            ]}
+                            {
+                                'component': 'VCard',
+                                'props': {'class': 'fill-height'},
+                                'content': [
+                                    {'component': 'VCardTitle', 'text': '🔔 通知预览'},
+                                    {'component': 'VDivider'},
+                                    {
+                                        'component': 'VImg',
+                                        'props': {
+                                            'src': last_notify.get('image'),
+                                            'height': '220',
+                                            'cover': True,
+                                            'class': 'bg-grey-lighten-2',
+                                            'show': bool(last_notify.get('image') and 'http' in last_notify.get('image'))
+                                        }
+                                    } if last_notify.get('image') else {'component': 'VSpacer'},
+                                    {
+                                        'component': 'VCardText',
+                                        'content': [
+                                            {'component': 'div', 'props': {'class': 'text-subtitle-1 font-weight-bold mb-2'}, 'text': last_notify.get('title', '等待中...')},
+                                            {'component': 'div', 'props': {'class': 'text-caption', 'style': 'white-space: pre-line'}, 'text': last_notify.get('text', '-')}
+                                        ]
+                                    }
+                                ]
+                            }
                         ]
                     }
                 ]
