@@ -872,7 +872,7 @@ class MediaServerMsgAI(_PluginBase):
         if self._path_skip_keywords and item_path:
             item_path_lower = item_path.lower()
             if any(kw in item_path_lower for kw in self._path_skip_keywords):
-                logger.info(f"路径呾�命中黑名单，跳过TMDB识别: {item_path}")
+                logger.info(f"路径命中黑名单，跳过TMDB识别: {item_path}")
                 return None
 
         if event_info.tmdb_id:
