@@ -239,7 +239,8 @@ class MediaServerMsgAI(_PluginBase):
             {"title": "停止播放", "value": "playback.stop|media.stop|PlaybackStop"},
             {"title": "暂停/继续", "value": "playback.pause|playback.unpause|media.pause|media.resume"},
             {"title": "用户标记", "value": "item.rate|item.markplayed|item.markunplayed"},
-            {"title": "用户登录", "value": "user.authenticated|user.authenticationfailed"},
+            {"title": "登录成功", "value": "user.authenticated"},
+            {"title": "登录失败", "value": "user.authenticationfailed"},
             {"title": "系统测试", "value": "system.webhooktest|system.notificationtest"},
             {"title": "媒体深度删除", "value": "deep.delete"},
         ]
