@@ -54,7 +54,7 @@ class MediaServerMsgAI(_PluginBase):
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "2.1.1"
+    plugin_version = "2.1.2"
     plugin_author = "dragon-tang"
     author_url = "https://github.com/dragon-tang"
     plugin_config_prefix = "mediaservermsgai_"
@@ -242,137 +242,72 @@ class MediaServerMsgAI(_PluginBase):
             {"title": "媒体深度删除", "value": "deep.delete"},
         ]
         return [
-            {'component': 'VForm', 'content': [
-                {'component': 'VRow', 'content': [
-                    # ==================== 左侧列 ====================
-                    {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [
-                        # ===== 🛠️ 基本设置 =====
-                        {
-                            'component': 'VCard',
-                            'props': {'variant': 'flat', 'class': 'mb-4'},
-                            'content': [
-                                {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '🛠️ 基本设置'},
-                                {'component': 'VDivider'},
-                                {'component': 'VCardText', 'content': [
-                                    {
-                                        'component': 'VRow',
-                                        'content': [
-                                            {'component': 'VCol', 'props': {'cols': 12, 'sm': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'enabled', 'label': '启用插件', 'color': 'primary', 'inset': True}}]},
-                                            {'component': 'VCol', 'props': {'cols': 12, 'sm': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'add_play_link', 'label': '添加播放链接', 'color': 'primary', 'inset': True}}]}
-                                        ]
-                                    },
-                                    {
-                                        'component': 'VRow',
-                                        'content': [
-                                            {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VSelect', 'props': {'multiple': True, 'chips': True, 'clearable': True, 'model': 'mediaservers', 'label': '媒体服务器', 'items': self._get_mediaserver_items(), 'density': 'compact', 'hide-details': 'auto'}}]}
-                                        ]
-                                    },
-                                    {
-                                        'component': 'VRow',
-                                        'content': [
-                                            {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VSelect', 'props': {'chips': True, 'multiple': True, 'model': 'types', 'label': '消息类型', 'items': types_options, 'density': 'compact', 'hide-details': 'auto'}}]}
-                                        ]
-                                    }
-                                ]}
-                            ]
-                        },
-                        # ===== 📦 入库设置 =====
-                        {
-                            'component': 'VCard',
-                            'props': {'variant': 'flat', 'class': 'mb-4'},
-                            'content': [
-                                {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '📦 入库设置'},
-                                {'component': 'VDivider'},
-                                {'component': 'VCardText', 'content': [
-                                    {
-                                        'component': 'VRow',
-                                        'content': [
-                                            {'component': 'VCol', 'props': {'cols': 12, 'sm': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'aggregate_enabled', 'label': '启用TV剧集入库聚合', 'color': 'primary', 'inset': True}}]},
-                                            {'component': 'VCol', 'props': {'cols': 12, 'sm': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'smart_category_enabled', 'label': '启用智能分类', 'color': 'primary', 'inset': True, 'hint': '关闭则使用路径解析'}}]}
-                                        ]
-                                    },
-                                    {
-                                        'component': 'VRow',
-                                        'props': {'show': '{{aggregate_enabled}}'},
-                                        'content': [
-                                            {'component': 'VCol', 'props': {'cols': 12, 'sm': 6}, 'content': [{'component': 'VTextField', 'props': {'model': 'aggregate_time', 'label': '聚合等待时间（秒）', 'placeholder': '15', 'type': 'number', 'density': 'compact', 'hide-details': 'auto'}}]}
-                                        ]
-                                    }
-                                ]}
-                            ]
-                        }
-                    ]},
-                    # ==================== 右侧列 ====================
-                    {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [
-                        # ===== 🔍 过滤设置 =====
-                        {
-                            'component': 'VCard',
-                            'props': {'variant': 'flat', 'class': 'mb-4'},
-                            'content': [
-                                {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '🔍 过滤设置'},
-                                {'component': 'VDivider'},
-                                {'component': 'VCardText', 'content': [
-                                    {
-                                        'component': 'VRow',
-                                        'content': [
-                                            {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VSwitch', 'props': {'model': 'filter_unrecognized', 'label': 'TMDB未识别视频不发送通知', 'color': 'primary', 'inset': True, 'hint': '启用后，未识别到TMDB信息的视频（入库和播放）都不会发送通知'}}]}
-                                        ]
-                                    },
-                                    {
-                                        'component': 'VRow',
-                                        'content': [
-                                            {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VTextarea', 'props': {'model': 'path_skip_keywords', 'label': '路径关键词黑名单（跳过TMDB识别）', 'placeholder': '每行一个关键词，Path包含任意关键词时跳过TMDB识别\n例如：\n日本有码\n日本无码', 'rows': 4, 'density': 'compact', 'hide-details': 'auto', 'hint': '命中关键词的媒体不会进行TMDB识别'}}]}
-                                        ]
-                                    }
-                                ]}
-                            ]
-                        },
-                        # ===== 🖼️ 显示设置 =====
-                        {
-                            'component': 'VCard',
-                            'props': {'variant': 'flat', 'class': 'mb-4'},
-                            'content': [
-                                {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '🖼️ 显示设置'},
-                                {'component': 'VDivider'},
-                                {'component': 'VCardText', 'content': [
-                                    {
-                                        'component': 'VRow',
-                                        'content': [
-                                            {'component': 'VCol', 'props': {'cols': 12, 'sm': 6}, 'content': [{'component': 'VTextField', 'props': {'model': 'overview_max_length', 'label': '简介最大长度', 'placeholder': '150', 'type': 'number', 'density': 'compact', 'hide-details': 'auto', 'hint': '默认150'}}]}
-                                        ]
-                                    },
-                                    {
-                                        'component': 'VRow',
-                                        'content': [
-                                            {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VTextField', 'props': {'model': 'emby_image_host', 'label': '自定义Emby图片Host', 'placeholder': '例如：http://1.1.1.1:8099', 'density': 'compact', 'hide-details': 'auto', 'hint': '拦截路径的媒体图片将使用此Host构造URL'}}]}
-                                        ]
-                                    }
-                                ]}
-                            ]
-                        }
-                    ]}
-                ]}
-            ]},
-        {
-            "enabled": False,
-            "add_play_link": False,
-                                {
-                                    'component': 'VRow',
-                                    'content': [
-                                        {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'aggregate_enabled', 'label': '启用TV剧集入库聚合'}}]},
-                                        {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'smart_category_enabled', 'label': '启用智能分类（关闭则使用路径解析）'}}]}
-                                    ]
-                                },
-                                {
-                                    'component': 'VRow',
-                                    'props': {'show': '{{aggregate_enabled}}'},
-                                    'content': [
-                                        {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [{'component': 'VTextField', 'props': {'model': 'aggregate_time', 'label': '聚合等待时间（秒）', 'placeholder': '15', 'type': 'number'}}]}
-                                    ]
-                                    }
+            {
+                'component': 'VForm',
+                'content': [
+                    {'component': 'VRow', 'content': [
+                        # Left Column
+                        {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [
+                            # ===== 🛠️ 基本设置 =====
+                            {
+                                'component': 'VCard', 'props': {'variant': 'flat', 'class': 'mb-4'},
+                                'content': [
+                                    {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '🛠️ 基本设置'},
+                                    {'component': 'VDivider'},
+                                    {'component': 'VCardText', 'content': [
+                                        {'component': 'VRow', 'content': [
+                                            {'component': 'VCol', 'props': {'cols': 12, 'sm': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'enabled', 'label': '启用插件', 'density': 'compact', 'hide-details': 'auto'}}]},
+                                            {'component': 'VCol', 'props': {'cols': 12, 'sm': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'add_play_link', 'label': '添加播放链接', 'density': 'compact', 'hide-details': 'auto'}}]}
+                                        ]},
+                                        {'component': 'VSelect', 'props': {'multiple': True, 'chips': True, 'clearable': True, 'model': 'mediaservers', 'label': '媒体服务器', 'items': self._get_mediaserver_items(), 'density': 'compact', 'hide-details': 'auto', 'class': 'mt-4'}},
+                                        {'component': 'VSelect', 'props': {'chips': True, 'multiple': True, 'model': 'types', 'label': '消息类型', 'items': types_options, 'density': 'compact', 'hide-details': 'auto', 'class': 'mt-4'}}
                                     ]}
-                        ]
-                    }
+                                ]
+                            },
+                            # ===== 📦 入库设置 =====
+                            {
+                                'component': 'VCard', 'props': {'variant': 'flat', 'class': 'mb-4'},
+                                'content': [
+                                    {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '📦 入库设置'},
+                                    {'component': 'VDivider'},
+                                    {'component': 'VCardText', 'content': [
+                                        {'component': 'VRow', 'content': [
+                                            {'component': 'VCol', 'props': {'cols': 12, 'sm': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'aggregate_enabled', 'label': '启用TV剧集入库聚合', 'density': 'compact', 'hide-details': 'auto'}}]},
+                                            {'component': 'VCol', 'props': {'cols': 12, 'sm': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'smart_category_enabled', 'label': '启用智能分类', 'density': 'compact', 'hide-details': 'auto'}}]}
+                                        ]},
+                                        {'component': 'VTextField', 'props': {'show': '{{aggregate_enabled}}', 'model': 'aggregate_time', 'label': '聚合等待时间（秒）', 'placeholder': '15', 'type': 'number', 'density': 'compact', 'hide-details': 'auto', 'class': 'mt-4'}}
+                                    ]}
+                                ]
+                            }
+                        ]},
+                        # Right Column
+                        {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [
+                            # ===== 🔍 过滤设置 =====
+                            {
+                                'component': 'VCard', 'props': {'variant': 'flat', 'class': 'mb-4'},
+                                'content': [
+                                    {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '🔍 过滤设置'},
+                                    {'component': 'VDivider'},
+                                    {'component': 'VCardText', 'content': [
+                                        {'component': 'VSwitch', 'props': {'model': 'filter_unrecognized', 'label': 'TMDB未识别视频不发送通知', 'hint': '启用后，未识别到TMDB信息的视频（入库和播放）都不会发送通知', 'density': 'compact'}},
+                                        {'component': 'VTextarea', 'props': {'model': 'path_skip_keywords', 'label': '路径关键词黑名单（跳过TMDB识别）', 'placeholder': '每行一个关键词，Path包含任意关键词时跳过TMDB识别', 'rows': 4, 'hint': '命中关键词的媒体不会进行TMDB识别', 'density': 'compact', 'class': 'mt-4'}}
+                                    ]}
+                                ]
+                            },
+                            # ===== 🖼️ 显示设置 =====
+                            {
+                                'component': 'VCard', 'props': {'variant': 'flat'},
+                                'content': [
+                                    {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '🖼️ 显示设置'},
+                                    {'component': 'VDivider'},
+                                    {'component': 'VCardText', 'content': [
+                                        {'component': 'VTextField', 'props': {'model': 'overview_max_length', 'label': '简介最大长度', 'placeholder': '150', 'type': 'number', 'hint': '入库通知中简介文字的最大字符数', 'density': 'compact', 'hide-details': 'auto'}},
+                                        {'component': 'VTextField', 'props': {'model': 'emby_image_host', 'label': '自定义Emby图片Host', 'placeholder': '例如：http://1.1.1.1:8099', 'hint': '拦截路径的媒体图片将使用此Host构造URL', 'density': 'compact', 'hide-details': 'auto', 'class': 'mt-4'}}
+                                    ]}
+                                ]
+                            }
+                        ]}
+                    ]}
                 ]
             }
         ], {
@@ -427,11 +362,21 @@ class MediaServerMsgAI(_PluginBase):
                                             {'component': 'VCardTitle', 'text': '🛠️ 核心配置'},
                                             {'component': 'VDivider'},
                                             {'component': 'VCardText', 'content': [
-                                                {'component': 'VList', 'props': {'density': 'compact', 'class': 'bg-transparent py-0'}, 'content': [
-                                                    self._render_info_item_text("媒体服务器", "、".join(self._mediaservers or ["未选择"])),
-                                                    self._render_info_item_text("剧集聚合", f"{self._aggregate_time}s" if self._aggregate_enabled else "已禁用"),
-                                                    self._render_info_item_chip("智能分类", self._smart_category_enabled),
-                                                    self._render_info_item_chip("未识别过滤", self._filter_unrecognized)
+                                                {'component': 'VList', 'props': {'density': 'compact', 'class': 'bg-transparent'}, 'content': [
+                                                    self._render_info_item("媒体服务器", "、".join(self._mediaservers or ["未选择"])),
+                                                    self._render_info_item("剧集聚合", f"{self._aggregate_time}s" if self._aggregate_enabled else "已禁用"),
+                                                    {'component': 'VListItem', 'props': {'class': 'px-0'}, 'content': [
+                                                        {'component': 'VListItemTitle', 'props': {'class': 'text-grey-darken-1'}, 'text': '智能分类'},
+                                                        {'component': 'VListItemAction', 'content': [
+                                                            {'component': 'VChip', 'props': {'color': 'primary' if self._smart_category_enabled else 'default', 'size': 'small', 'text': '开启' if self._smart_category_enabled else '关闭'}}
+                                                        ]}
+                                                    ]},
+                                                    {'component': 'VListItem', 'props': {'class': 'px-0'}, 'content': [
+                                                        {'component': 'VListItemTitle', 'props': {'class': 'text-grey-darken-1'}, 'text': '未识别过滤'},
+                                                        {'component': 'VListItemAction', 'content': [
+                                                            {'component': 'VChip', 'props': {'color': 'primary' if self._filter_unrecognized else 'default', 'size': 'small', 'text': '开启' if self._filter_unrecognized else '关闭'}}
+                                                        ]}
+                                                    ]}
                                                 ]}
                                             ]}
                                         ]}
@@ -447,7 +392,7 @@ class MediaServerMsgAI(_PluginBase):
                                 ]
                             },
                             # 处理历史
-                            {'component': 'VCard', 'props': {'class': 'mt-4', 'variant': 'flat'}, 'content': [
+                            {
                                 'component': 'VCard', 'props': {'class': 'mt-4', 'variant': 'flat'}, 'content': [
                                     {'component': 'VCardTitle', 'text': '📜 处理历史 (最近10条)'},
                                     {'component': 'VDivider'},
@@ -532,7 +477,7 @@ class MediaServerMsgAI(_PluginBase):
             ]
         }
 
-    def _render_info_item_text(self, label: str, value: str) -> dict:
+    def _render_info_item(self, label: str, value: str) -> dict:
         """渲染 VList 名值对"""
         return {
             'component': 'VListItem',
@@ -543,27 +488,16 @@ class MediaServerMsgAI(_PluginBase):
             ]
         }
 
-    def _render_info_item_chip(self, label: str, is_enabled: bool) -> dict:
-        """渲染带状态 Chip 的 VList 项"""
-        return {
-            'component': 'VListItem', 'props': {'class': 'px-0'}, 'content': [
-                {'component': 'VListItemTitle', 'props': {'class': 'text-grey-darken-1'}, 'text': label},
-                {'component': 'VListItemAction', 'content': [
-                    {'component': 'VChip', 'props': {'text': '开启' if is_enabled else '关闭', 'color': 'success' if is_enabled else 'default', 'size': 'small', 'variant': 'tonal'}}
-                ]}
-            ]
-        }
-
     def _build_event_detail(self, event: dict) -> List[dict]:
         """构建事件详情列表，无事件则显示空状态"""
         if not event:
             return [{'component': 'div', 'props': {'class': 'text-center text-grey'}, 'text': '当有新的 Webhook 事件触发时，这里将显示其详细信息。'}]
-        return [{'component': 'VList', 'props': {'density': 'compact', 'class': 'bg-transparent py-0'}, 'content': [
-                self._render_info_item_text("时间", event.get('time', '-')),
-                self._render_info_item_text("类型", event.get('action', '-')),
-                self._render_info_item_text("用户", event.get('user', '-')),
-                self._render_info_item_text("媒体", event.get('media', '-')),
-                self._render_info_item_text("路径", event.get('path', '-'))
+        return [{'component': 'VList', 'props': {'density': 'compact', 'class': 'bg-transparent'}, 'content': [
+                self._render_info_item("时间", event.get('time', '-')),
+                self._render_info_item("类型", event.get('action', '-')),
+                self._render_info_item("用户", event.get('user', '-')),
+                self._render_info_item("媒体", event.get('media', '-')),
+                self._render_info_item("路径", event.get('path', '-'))
         ]}]
 
     def _set_last_event_snapshot(self, event_info: WebhookEventInfo):
