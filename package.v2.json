@@ -3,11 +3,12 @@
     "name": "媒体库服务器通知AI版",
     "description": "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)",
     "labels": "消息通知,媒体库",
-    "version": "2.1.0",
+    "version": "2.1.1",
     "icon": "mediaplay.png",
     "author": "jxxghp",
     "level": 1,
     "history": {
+      "v2.1.1": "修复：历史表格 colspan 错位、深度删除消息无长度限制、合并登录成功/失败为单一选项后已恢复独立。",
       "v2.1.0": "代码优化：简化 TMDB 过滤嵌套、定义媒体类型常量、修复 _get_series_id 回退逻辑、去除多余 hasattr 防御检查、修复 get_page 缩进。UI 美化：配置表单分区为四大卡片区域、登录成功/失败独立开关、历史记录扩至 10 条并增加用户列、通知预览增加消息类型标签、登录成功/失败不同图标。",
       "v2.0.8": "增强登录事件通知：从原始 Webhook JSON 提取用户名（支持 Title 回退解析）、展示 DeviceInfo（Name/AppName/AppVersion）、IP 从 Description 自动提取、排版美化。",
       "v2.0.7": "修复 Telegram 收不到登录/测试类通知的问题，媒体服务器图标改为可访问的公网 URL。",
