@@ -46,11 +46,17 @@ class MediaServerMsgAI(_PluginBase):
     SERIES_TMDB_CACHE_TTL = 3600
     SERIES_TMDB_NEGATIVE_CACHE_TTL = 300
 
+    # ==================== 媒体类型常量 ====================
+    MT_MOVIE = "MOV"
+    MT_TV = "TV"
+    MT_SHOW = "SHOW"
+    MT_AUDIO = "AUD"
+    MT_MUSIC_ALBUM = "MusicAlbum"
     # ==================== 插件基本信息 ====================
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "2.0.8"
+    plugin_version = "2.1.0"
     plugin_author = "dragon-tang"
     author_url = "https://github.com/dragon-tang"
     plugin_config_prefix = "mediaservermsgai_"
@@ -233,7 +239,8 @@ class MediaServerMsgAI(_PluginBase):
             {"title": "停止播放", "value": "playback.stop|media.stop|PlaybackStop"},
             {"title": "暂停/继续", "value": "playback.pause|playback.unpause|media.pause|media.resume"},
             {"title": "用户标记", "value": "item.rate|item.markplayed|item.markunplayed"},
-            {"title": "登录提醒", "value": "user.authenticated|user.authenticationfailed"},
+            {"title": "登录成功", "value": "user.authenticated"},
+            {"title": "登录失败", "value": "user.authenticationfailed"},
             {"title": "系统测试", "value": "system.webhooktest|system.notificationtest"},
             {"title": "媒体深度删除", "value": "deep.delete"},
         ]
@@ -241,61 +248,105 @@ class MediaServerMsgAI(_PluginBase):
             {
                 'component': 'VForm',
                 'content': [
+                    # ===== 🛠️ 基本设置 =====
                     {
-                        'component': 'VRow',
+                        'component': 'VCard',
+                        'props': {'variant': 'flat', 'class': 'mb-4'},
                         'content': [
-                            {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'enabled', 'label': '启用插件'}}]},
-                            {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'add_play_link', 'label': '添加播放链接'}}]}
+                            {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '🛠️ 基本设置'},
+                            {'component': 'VDivider'},
+                            {'component': 'VCardText', 'content': [
+                                {
+                                    'component': 'VRow',
+                                    'content': [
+                                        {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'enabled', 'label': '启用插件'}}]},
+                                        {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'add_play_link', 'label': '添加播放链接'}}]}
+                                    ]
+                                },
+                                {
+                                    'component': 'VRow',
+                                    'content': [
+                                        {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VSelect', 'props': {'multiple': True, 'chips': True, 'clearable': True, 'model': 'mediaservers', 'label': '媒体服务器', 'items': self._get_mediaserver_items()}}]}
+                                    ]
+                                },
+                                {
+                                    'component': 'VRow',
+                                    'content': [
+                                        {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VSelect', 'props': {'chips': True, 'multiple': True, 'model': 'types', 'label': '消息类型', 'items': types_options}}]}
+                                    ]
+                                }
+                            ]}
                         ]
                     },
+                    # ===== 📦 入库设置 =====
                     {
-                        'component': 'VRow',
+                        'component': 'VCard',
+                        'props': {'variant': 'flat', 'class': 'mb-4'},
                         'content': [
-                            {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VSelect', 'props': {'multiple': True, 'chips': True, 'clearable': True, 'model': 'mediaservers', 'label': '媒体服务器', 'items': self._get_mediaserver_items()}}]}
+                            {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '📦 入库设置'},
+                            {'component': 'VDivider'},
+                            {'component': 'VCardText', 'content': [
+                                {
+                                    'component': 'VRow',
+                                    'content': [
+                                        {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'aggregate_enabled', 'label': '启用TV剧集入库聚合'}}]},
+                                        {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'smart_category_enabled', 'label': '启用智能分类（关闭则使用路径解析）'}}]}
+                                    ]
+                                },
+                                {
+                                    'component': 'VRow',
+                                    'props': {'show': '{{aggregate_enabled}}'},
+                                    'content': [
+                                        {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [{'component': 'VTextField', 'props': {'model': 'aggregate_time', 'label': '聚合等待时间（秒）', 'placeholder': '15', 'type': 'number'}}]}
+                                    ]
+                                }
+                            ]}
                         ]
                     },
+                    # ===== 🔍 过滤设置 =====
                     {
-                        'component': 'VRow',
+                        'component': 'VCard',
+                        'props': {'variant': 'flat', 'class': 'mb-4'},
                         'content': [
-                            {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VSelect', 'props': {'chips': True, 'multiple': True, 'model': 'types', 'label': '消息类型', 'items': types_options}}]}
+                            {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '🔍 过滤设置'},
+                            {'component': 'VDivider'},
+                            {'component': 'VCardText', 'content': [
+                                {
+                                    'component': 'VRow',
+                                    'content': [
+                                        {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'filter_unrecognized', 'label': 'TMDB未识别视频不发送通知', 'hint': '启用后，未识别到TMDB信息的视频（入库和播放）都不会发送通知'}}]}
+                                    ]
+                                },
+                                {
+                                    'component': 'VRow',
+                                    'content': [
+                                        {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VTextarea', 'props': {'model': 'path_skip_keywords', 'label': '路径关键词黑名单（跳过TMDB识别）', 'placeholder': '每行一个关键词，Path包含任意关键词时跳过TMDB识别\n例如：\n日本有码\n日本无码', 'rows': 4, 'hint': '命中关键词的媒体不会进行TMDB识别，若同时开启「未识别过滤」则也不会发送通知'}}]}
+                                    ]
+                                }
+                            ]}
                         ]
                     },
+                    # ===== 🖼️ 显示设置 =====
                     {
-                        'component': 'VRow',
+                        'component': 'VCard',
+                        'props': {'variant': 'flat'},
                         'content': [
-                            {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'aggregate_enabled', 'label': '启用TV剧集入库聚合'}}]},
-                            {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'smart_category_enabled', 'label': '启用智能分类（关闭则使用路径解析）'}}]}
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'props': {'show': '{{aggregate_enabled}}'},
-                        'content': [
-                            {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [{'component': 'VTextField', 'props': {'model': 'aggregate_time', 'label': '聚合等待时间（秒）', 'placeholder': '15', 'type': 'number'}}]}
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [{'component': 'VSwitch', 'props': {'model': 'filter_unrecognized', 'label': 'TMDB未识别视频不发送通知', 'hint': '启用后，未识别到TMDB信息的视频（入库和播放）都不会发送通知'}}]}
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VTextarea', 'props': {'model': 'path_skip_keywords', 'label': '路径关键词黑名单（跳过TMDB识别）', 'placeholder': '每行一个关键词，Path包含任意关键词时跳过TMDB识别\n例如：\n日本有码\n日本无码', 'rows': 4, 'hint': '命中关键词的媒体不会进行TMDB识别，若同时开启「未识别过滤」则也不会发送通知'}}]}
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [{'component': 'VTextField', 'props': {'model': 'overview_max_length', 'label': '简介最大长度', 'placeholder': '150', 'type': 'number', 'hint': '入库通知中简介文字的最大字符数，超出部分截断，默认150'}}]}
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VTextField', 'props': {'model': 'emby_image_host', 'label': '自定义Emby图片Host', 'placeholder': '例如：http://1.1.1.1:8099', 'hint': '拦截路径的媒体图片将使用此Host构造URL，留空则使用插件内配置的Emby地址'}}]}
+                            {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '🖼️ 显示设置'},
+                            {'component': 'VDivider'},
+                            {'component': 'VCardText', 'content': [
+                                {
+                                    'component': 'VRow',
+                                    'content': [
+                                        {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [{'component': 'VTextField', 'props': {'model': 'overview_max_length', 'label': '简介最大长度', 'placeholder': '150', 'type': 'number', 'hint': '入库通知中简介文字的最大字符数，超出部分截断，默认150'}}]}
+                                    ]
+                                },
+                                {
+                                    'component': 'VRow',
+                                    'content': [
+                                        {'component': 'VCol', 'props': {'cols': 12}, 'content': [{'component': 'VTextField', 'props': {'model': 'emby_image_host', 'label': '自定义Emby图片Host', 'placeholder': '例如：http://1.1.1.1:8099', 'hint': '拦截路径的媒体图片将使用此Host构造URL，留空则使用插件内配置的Emby地址'}}]}
+                                    ]
+                                }
+                            ]}
                         ]
                     }
                 ]
@@ -315,113 +366,117 @@ class MediaServerMsgAI(_PluginBase):
         }
 
     def get_page(self) -> List[dict]:
-            # 1. 基础数据准备
-            with self._lock:
-                last_event = dict(self._last_event_snapshot)
-                last_notify = dict(self._last_notification_snapshot)
-                history = list(self._event_history or [])
-                cache_count = len(self._image_cache)
+        # 1. 基础数据准备
+        with self._lock:
+            last_event = dict(self._last_event_snapshot)
+            last_notify = dict(self._last_notification_snapshot)
+            history = list(self._event_history or [])
+            cache_count = len(self._image_cache)
                 
-            status_color = "success" if self._enabled else "error"
-            status_text = "运行中" if self._enabled else "已停止"
+        status_color = "success" if self._enabled else "error"
+        status_text = "运行中" if self._enabled else "已停止"
 
-            return [
-                # --- 第一行：统一统计行 (解决对齐问题的核心) ---
-                {
-                    'component': 'VRow',
-                    'content': [
-                        self._build_stat_card("累计处理次数", str(self._total_events), "mdi-history", "primary", md=4),
-                        self._build_stat_card("TMDB 图片缓存", str(cache_count), "mdi-image-multiple", "info", md=4),
-                        self._build_stat_card("插件状态", status_text, "mdi-play-circle", status_color, md=4),
-                    ]
-                },
-                # --- 第二行：主体区域 ---
-                {
-                    'component': 'VRow',
-                    'props': {'class': 'mt-0'}, # mt-0 确保与上方统计行紧凑对齐
-                    'content': [
-                        # 左侧区域 (占据 8/12 宽度)
-                        {
-                            'component': 'VCol',
-                            'props': {'cols': 12, 'md': 8},
-                            'content': [
-                                {
-                                    'component': 'VRow',
-                                    'content': [
-                                        # 核心配置
-                                        {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [
-                                            {'component': 'VCard', 'props': {'variant': 'flat', 'class': 'fill-height'}, 'content': [
-                                                {'component': 'VCardTitle', 'text': '🛠️ 核心配置'},
-                                                {'component': 'VDivider'},
-                                                {'component': 'VCardText', 'content': [
-                                                    self._render_info_item("媒体服务器", "、".join(self._mediaservers or ["未选择"])),
-                                                    self._render_info_item("剧集聚合", f"{self._aggregate_time}s" if self._aggregate_enabled else "已禁用"),
-                                                    self._render_info_item("智能分类", "✅ 开启" if self._smart_category_enabled else "❌ 关闭"),
-                                                    self._render_info_item("未识别过滤", "🛡️ 开启" if self._filter_unrecognized else "🔓 关闭"),
-                                                ]}
-                                            ]}
-                                        ]},
-                                        # 最新事件
-                                        {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [
-                                            {'component': 'VCard', 'props': {'variant': 'flat', 'class': 'fill-height'}, 'content': [
-                                                {'component': 'VCardTitle', 'text': '📡 最新事件'},
-                                                {'component': 'VDivider'},
-                                                {'component': 'VCardText', 'content': self._build_event_detail(last_event)}
+        return [
+            # --- 第一行：统一统计行 (解决对齐问题的核心) ---
+            {
+                'component': 'VRow',
+                'content': [
+                    self._build_stat_card("累计处理次数", str(self._total_events), "mdi-history", "primary", md=4),
+                    self._build_stat_card("TMDB 图片缓存", str(cache_count), "mdi-image-multiple", "info", md=4),
+                    self._build_stat_card("插件状态", status_text, "mdi-play-circle", status_color, md=4),
+                ]
+            },
+            # --- 第二行：主体区域 ---
+            {
+                'component': 'VRow',
+                'props': {'class': 'mt-0'}, # mt-0 确保与上方统计行紧凑对齐
+                'content': [
+                    # 左侧区域 (占据 8/12 宽度)
+                    {
+                        'component': 'VCol',
+                        'props': {'cols': 12, 'md': 8},
+                        'content': [
+                            {
+                                'component': 'VRow',
+                                'content': [
+                                    # 核心配置
+                                    {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [
+                                        {'component': 'VCard', 'props': {'variant': 'flat', 'class': 'fill-height'}, 'content': [
+                                            {'component': 'VCardTitle', 'text': '🛠️ 核心配置'},
+                                            {'component': 'VDivider'},
+                                            {'component': 'VCardText', 'content': [
+                                                self._render_info_item("媒体服务器", "、".join(self._mediaservers or ["未选择"])),
+                                                self._render_info_item("剧集聚合", f"{self._aggregate_time}s" if self._aggregate_enabled else "已禁用"),
+                                                self._render_info_item("智能分类", "✅ 开启" if self._smart_category_enabled else "❌ 关闭"),
+                                                self._render_info_item("未识别过滤", "🛡️ 开启" if self._filter_unrecognized else "🔓 关闭"),
                                             ]}
                                         ]}
-                                    ]
-                                },
-                                # 处理历史
-                                {
-                                    'component': 'VCard', 'props': {'class': 'mt-4', 'variant': 'flat'}, 'content': [
-                                        {'component': 'VCardTitle', 'text': '📜 处理历史 (最近5条)'},
-                                        {'component': 'VDivider'},
-                                        {
-                                            'component': 'VTable', 'props': {'density': 'compact'}, 'content': [
-                                                {'component': 'thead', 'content': [{'component': 'tr', 'content': [
-                                                    {'component': 'th', 'text': '时间'}, {'component': 'th', 'text': '事件'},
-                                                    {'component': 'th', 'text': '媒体名称'}, {'component': 'th', 'text': '结果'}
-                                                ]}]},
-                                                {'component': 'tbody', 'content': [
-                                                    {'component': 'tr', 'content': [
-                                                        {'component': 'td', 'text': h.get('time', '')[11:]},
-                                                        {'component': 'td', 'text': h.get('action', '通知')},
-                                                        {'component': 'td', 'props': {'class': 'text-truncate', 'style': 'max-width: 250px'}, 'text': h.get('media', '-')},
-                                                        {'component': 'td', 'content': [{'component': 'VChip', 'props': {'color': 'success', 'size': 'x-small'}, 'text': '已处理'}]}
-                                                    ]} for h in history
-                                                ] if history else [{'component': 'tr', 'content': [{'component': 'td', 'props': {'colspan': 4, 'class': 'text-center pa-4'}, 'text': '暂无历史记录'}]}]}
-                                            ]
-                                        }
-                                    ]
-                                }
-                            ]
-                        },
-                        # 右侧区域：只有通知预览 (占据 4/12 宽度)
-                        {
-                            'component': 'VCol',
-                            'props': {'cols': 12, 'md': 4},
-                            'content': [
-                                {
-                                    'component': 'VCard',
-                                    'props': {'class': 'fill-height d-flex flex-column', 'variant': 'flat'},
-                                    'content': [
-                                        {'component': 'VCardTitle', 'text': '🔔 通知预览'},
-                                        {'component': 'VDivider'},
-                                        {'component': 'VImg', 'props': {
-                                            'src': last_notify.get('image'), 'height': '240', 'cover': True, 'class': 'bg-grey-lighten-2',
-                                            'show': bool(last_notify.get('image') and 'http' in last_notify.get('image'))
-                                        }} if last_notify.get('image') else {'component': 'VSpacer'},
-                                        {'component': 'VCardText', 'props': {'class': 'flex-grow-1'}, 'content': [
-                                            {'component': 'div', 'props': {'class': 'text-subtitle-1 font-weight-bold mb-2'}, 'text': last_notify.get('title', '等待入库...')},
-                                            {'component': 'div', 'props': {'class': 'text-body-2', 'style': 'white-space: pre-line'}, 'text': last_notify.get('text', '-')}
+                                    ]},
+                                    # 最新事件
+                                    {'component': 'VCol', 'props': {'cols': 12, 'md': 6}, 'content': [
+                                        {'component': 'VCard', 'props': {'variant': 'flat', 'class': 'fill-height'}, 'content': [
+                                            {'component': 'VCardTitle', 'text': '📡 最新事件'},
+                                            {'component': 'VDivider'},
+                                            {'component': 'VCardText', 'content': self._build_event_detail(last_event)}
                                         ]}
-                                    ]
-                                }
-                            ]
-                        }
-                    ]
-                }
-            ]
+                                    ]}
+                                ]
+                            },
+                            # 处理历史
+                            {
+                                'component': 'VCard', 'props': {'class': 'mt-4', 'variant': 'flat'}, 'content': [
+                                    {'component': 'VCardTitle', 'text': '📜 处理历史 (最近10条)'},
+                                    {'component': 'VDivider'},
+                                    {
+                                        'component': 'VTable', 'props': {'density': 'compact'}, 'content': [
+                                            {'component': 'thead', 'content': [{'component': 'tr', 'content': [
+                                                {'component': 'th', 'text': '时间'}, {'component': 'th', 'text': '事件'},
+                                                {'component': 'th', 'text': '媒体名称'}, {'component': 'th', 'text': '结果'}
+                                            ]}]},
+                                            {'component': 'tbody', 'content': [
+                                                {'component': 'tr', 'content': [
+                                                    {'component': 'td', 'text': h.get('time', '')[11:]},
+                                                    {'component': 'td', 'text': h.get('action', '通知')},
+                                                    {'component': 'td', 'props': {'class': 'text-truncate', 'style': 'max-width: 250px'}, 'text': h.get('media', '-')},
+                                                    {'component': 'td', 'content': [{'component': 'VChip', 'props': {'color': 'success', 'size': 'x-small'}, 'text': '已处理'}]}
+                                                ]} for h in history
+                                            ] if history else [{'component': 'tr', 'content': [{'component': 'td', 'props': {'colspan': 5, 'class': 'text-center pa-4'}, 'text': '暂无历史记录'}]}]}
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    # 右侧区域：只有通知预览 (占据 4/12 宽度)
+                    {
+                        'component': 'VCol',
+                        'props': {'cols': 12, 'md': 4},
+                        'content': [
+                            {
+                                'component': 'VCard',
+                                'props': {'class': 'fill-height d-flex flex-column', 'variant': 'flat'},
+                                'content': [
+                                    {'component': 'VCardTitle', 'props': {'class': 'd-flex align-center pa-3'}, 'content': [
+                                        {'component': 'span', 'text': '🔔 通知预览'},
+                                        {'component': 'VSpacer'},
+                                        {'component': 'VChip', 'props': {'color': 'primary', 'size': 'x-small', 'variant': 'tonal'}, 'text': last_notify.get('type', '-')}
+                                    ]},
+                                    {'component': 'VDivider'},
+                                    {'component': 'VImg', 'props': {
+                                        'src': last_notify.get('image'), 'height': '240', 'cover': True, 'class': 'bg-grey-lighten-2',
+                                        'show': bool(last_notify.get('image') and 'http' in last_notify.get('image'))
+                                    }} if last_notify.get('image') else {'component': 'VSpacer'},
+                                    {'component': 'VCardText', 'props': {'class': 'flex-grow-1'}, 'content': [
+                                        {'component': 'div', 'props': {'class': 'text-subtitle-1 font-weight-bold mb-2'}, 'text': last_notify.get('title', '等待入库...')},
+                                        {'component': 'div', 'props': {'class': 'text-body-2', 'style': 'white-space: pre-line'}, 'text': last_notify.get('text', '-')}
+                                    ]}
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
 
     @staticmethod
     def _short_page_text(value: Any, limit: int = 120, default: str = '-') -> str:
@@ -511,19 +566,19 @@ class MediaServerMsgAI(_PluginBase):
         }
         with self._lock:
             self._last_event_snapshot = snapshot
-            # 新增：记录到历史列表，只保留最近 5 条
-            if not hasattr(self, '_event_history'): self._event_history = []
+            # 记录到历史列表，保留最近 10 条
             self._event_history.insert(0, snapshot)
-            if len(self._event_history) > 5:
+            if len(self._event_history) > 10:
                 self._event_history.pop()
 
-    def _set_last_notification_snapshot(self, title: str, text: str, image: Optional[str] = None, link: Optional[str] = None):
+    def _set_last_notification_snapshot(self, title: str, text: str, image: Optional[str] = None, link: Optional[str] = None, notify_type: str = ''):
         snapshot = {
             'time': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()),
             'title': self._short_page_text(title, 120, '-'),
             'text': self._short_page_text(text, 220, '-'),
             'image': self._short_page_text(image, 120, '无'),
             'link': self._short_page_text(link, 120, '无'),
+            'type': notify_type or '通知',
         }
         with self._lock:
             self._last_notification_snapshot = snapshot
@@ -562,17 +617,15 @@ class MediaServerMsgAI(_PluginBase):
                     return
 
             # TMDB未识别视频过滤
-            if self._filter_unrecognized:
-                if event_info.item_type not in ["AUD", "MusicAlbum"]:
-                    if event_info.item_type in ["MOV", "TV", "SHOW"]:
-                        if event_lower in ("library.new", "playback.start", "playback.stop",
-                                           "media.play", "media.stop", "playbackstart", "playbackstop",
-                                           "playback.pause", "playback.unpause", "media.pause", "media.resume"):
-                            # 仅用本地数据判断，不依赖异步 API 结果，避免误丢通知
-                            tmdb_id = self._extract_tmdb_id_local(event_info)
-                            if not tmdb_id:
-                                logger.info(f"TMDB未识别视频，跳过通知: {event_info.item_name}")
-                                return
+            if self._filter_unrecognized and event_info.item_type in (self.MT_MOVIE, self.MT_TV, self.MT_SHOW):
+                if event_lower in ("library.new", "playback.start", "playback.stop",
+                                   "media.play", "media.stop", "playbackstart", "playbackstop",
+                                   "playback.pause", "playback.unpause", "media.pause", "media.resume"):
+                    # 仅用本地数据判断，不依赖异步 API 结果，避免误丢通知
+                    tmdb_id = self._extract_tmdb_id_local(event_info)
+                    if not tmdb_id:
+                        logger.info(f"TMDB未识别视频，跳过通知: {event_info.item_name}")
+                        return
 
             # 根据事件类型分发处理
             # self._set_last_event_snapshot(event_info)
@@ -593,13 +646,13 @@ class MediaServerMsgAI(_PluginBase):
                 self._handle_deep_delete_event(event_info)
                 return
 
-            if event_info.json_object and event_info.json_object.get('Item', {}).get('Type') == 'MusicAlbum' and event_lower == 'library.new':
+            if event_info.json_object and event_info.json_object.get('Item', {}).get('Type') == self.MT_MUSIC_ALBUM and event_lower == 'library.new':
                 self._handle_music_album(event_info, event_info.json_object.get('Item', {}))
                 return
 
             if (self._aggregate_enabled and
                 event_lower == "library.new" and
-                event_info.item_type in ["TV", "SHOW"]):
+                event_info.item_type in (self.MT_TV, self.MT_SHOW)):
                 series_id = self._get_series_id(event_info)
                 if series_id:
                     self._aggregate_tv_episodes(series_id, event_info, event)
@@ -624,7 +677,8 @@ class MediaServerMsgAI(_PluginBase):
         self._send_notification(
             title="🔔 媒体服务器通知测试",
             text="\n".join(texts),
-            image=self._webhook_images.get(event_info.channel)
+            image=self._webhook_images.get(event_info.channel),
+            notify_type="测试"
         )
 
     def _handle_login_event(self, event_info: WebhookEventInfo):
@@ -678,16 +732,17 @@ class MediaServerMsgAI(_PluginBase):
         texts.append(f"⏰ 时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
 
         self._send_notification(
-            title=f"🔐 {action}提醒",
+            title=f"{'🚫' if '失败' in action else '✅'} {action}提醒",
             text="\n".join(texts),
-            image=self._webhook_images.get(event_info.channel)
+            image=self._webhook_images.get(event_info.channel),
+            notify_type=action
         )
 
     def _handle_rate_event(self, event_info: WebhookEventInfo):
         """处理评分/标记消息"""
         tmdb_id = self._extract_tmdb_id_local(event_info)
 
-        if self._filter_unrecognized and event_info.item_type in ["MOV", "TV", "SHOW"]:
+        if self._filter_unrecognized and event_info.item_type in (self.MT_MOVIE, self.MT_TV, self.MT_SHOW):
             if not tmdb_id:
                 logger.info(f"TMDB未识别视频，跳过评分通知: {event_info.item_name}")
                 return
@@ -703,13 +758,14 @@ class MediaServerMsgAI(_PluginBase):
         self._set_last_event_snapshot(event_info)
         image_url = event_info.image_url
         if not image_url and tmdb_id:
-            mtype = MediaType.MOVIE if event_info.item_type == "MOV" else MediaType.TV
+            mtype = MediaType.MOVIE if event_info.item_type == self.MT_MOVIE else MediaType.TV
             image_url = self._get_tmdb_image(event_info, mtype)
 
         self._send_notification(
             title=f"⭐ 用户评分：{event_info.item_name}",
             text="\n".join(texts),
-            image=image_url or self._webhook_images.get(event_info.channel)
+            image=image_url or self._webhook_images.get(event_info.channel),
+            notify_type="评分"
         )
 
     def _handle_deep_delete_event(self, event_info: WebhookEventInfo):
@@ -761,7 +817,8 @@ class MediaServerMsgAI(_PluginBase):
         self._send_notification(
             title="🗑️ 神医助手 - 媒体深度删除",
             text="\n" + "\n".join(texts),
-            image=None
+            image=None,
+            notify_type="深度删除"
         )
 
     def _process_media_event(self, event: Event, event_info: WebhookEventInfo):
@@ -802,7 +859,7 @@ class MediaServerMsgAI(_PluginBase):
             image_url = self._get_emby_local_image(event_info) if _path_blocked else event_info.image_url
 
             # 音频单曲特殊处理
-            if event_info.item_type == "AUD":
+            if event_info.item_type == self.MT_AUDIO:
                 self._build_audio_message(event_info, message_texts)
                 action_base = (self._webhook_actions.get(event_info.event)
                                or self._webhook_actions.get(event_info.event.lower(), "通知"))
@@ -818,7 +875,7 @@ class MediaServerMsgAI(_PluginBase):
             else:
                 tmdb_info = None
                 if tmdb_id:
-                    mtype = MediaType.MOVIE if event_info.item_type == "MOV" else MediaType.TV
+                    mtype = MediaType.MOVIE if event_info.item_type == self.MT_MOVIE else MediaType.TV
                     try:
                         tmdb_info = self.chain.recognize_media(tmdbid=int(tmdb_id), mtype=mtype)
                     except Exception as e:
@@ -848,7 +905,7 @@ class MediaServerMsgAI(_PluginBase):
 
                 # 图片
                 if not image_url and not _path_blocked and tmdb_id:
-                    mtype = MediaType.TV if event_info.item_type in ["TV", "SHOW"] else MediaType.MOVIE
+                    mtype = MediaType.TV if event_info.item_type in (self.MT_TV, self.MT_SHOW) else MediaType.MOVIE
                     image_url = self._get_tmdb_image(event_info, mtype)
 
             if not message_title:
@@ -877,7 +934,8 @@ class MediaServerMsgAI(_PluginBase):
                 title=message_title,
                 text=message_text,
                 image=image_url,
-                link=play_link
+                link=play_link,
+                notify_type=ev_lower
             )
 
         except Exception as e:
@@ -885,9 +943,9 @@ class MediaServerMsgAI(_PluginBase):
 
     # ==================== 公共辅助方法 ====================
 
-    def _send_notification(self, title: str, text: str, image: Optional[str] = None, link: Optional[str] = None):
+    def _send_notification(self, title: str, text: str, image: Optional[str] = None, link: Optional[str] = None, notify_type: str = ''):
         image = self._normalize_notification_image(image)
-        self._set_last_notification_snapshot(title=title, text=text, image=image, link=link)
+        self._set_last_notification_snapshot(title=title, text=text, image=image, link=link, notify_type=notify_type)
         self.post_message(
             mtype=NotificationType.MediaServer,
             title=title,
@@ -938,7 +996,7 @@ class MediaServerMsgAI(_PluginBase):
         category = None
         if self._smart_category_enabled and tmdb_info and self.category:
             try:
-                if event_info.item_type == "MOV":
+                if event_info.item_type == self.MT_MOVIE:
                     category = self.category.get_movie_category(tmdb_info)
                 else:
                     category = self.category.get_tv_category(tmdb_info)
@@ -973,7 +1031,7 @@ class MediaServerMsgAI(_PluginBase):
         """获取剧集系列ID"""
         if event_info.json_object and isinstance(event_info.json_object, dict):
             item = event_info.json_object.get("Item", {})
-            return item.get("SeriesId") or item.get("SeriesName")
+            return item.get("SeriesId")
         return getattr(event_info, "series_id", None)
 
     # ==================== 剧集聚合逻辑 ====================
@@ -1078,7 +1136,8 @@ class MediaServerMsgAI(_PluginBase):
             title=message_title,
             text="\n" + "\n".join(message_texts),
             image=image_url,
-            link=play_link
+            link=play_link,
+            notify_type="aggregated"
         )
 
     # ==================== 集数合并逻辑 ====================
@@ -1408,7 +1467,7 @@ class MediaServerMsgAI(_PluginBase):
         try:
             path = os.path.normpath(path)
 
-            if is_folder and item_type in ["TV", "SHOW"]:
+            if is_folder and item_type in (self.MT_TV, self.MT_SHOW):
                 return os.path.basename(os.path.dirname(path))
 
             current_dir = os.path.dirname(path)
@@ -1511,7 +1570,8 @@ class MediaServerMsgAI(_PluginBase):
                 title=f"🎵 新入库媒体：{song_name}",
                 text="\n" + "\n".join(texts),
                 image=image_url,
-                link=link
+                link=link,
+                notify_type="音频"
             )
         except Exception as e:
             logger.error(f"发送单曲通知失败: {str(e)}")
