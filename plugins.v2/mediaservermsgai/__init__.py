@@ -41,8 +41,6 @@ class MediaServerMsgAI(_PluginBase):
     DEFAULT_OVERVIEW_MAX_LENGTH = 150
     MIN_AGGREGATE_TIME = 1
     MIN_OVERVIEW_MAX_LENGTH = 20
-    IMAGE_CACHE_MAX_SIZE = 100
-    IMAGE_NEGATIVE_CACHE_TTL = 300
     SERIES_TMDB_CACHE_TTL = 3600
     SERIES_TMDB_NEGATIVE_CACHE_TTL = 300
 
@@ -107,7 +105,6 @@ class MediaServerMsgAI(_PluginBase):
         self._total_events = 0  # 处理事件总数
         self._event_history = [] # 存储最近 5-10 条记录
         self._last_event_cache: Tuple[Optional[Event], float] = (None, 0.0)
-        self._image_cache = OrderedDict()
         self._http_session = requests.Session()
         self._overview_max_length = self.DEFAULT_OVERVIEW_MAX_LENGTH
         self._filter_unrecognized = True
@@ -371,7 +368,6 @@ class MediaServerMsgAI(_PluginBase):
             last_event = dict(self._last_event_snapshot)
             last_notify = dict(self._last_notification_snapshot)
             history = list(self._event_history or [])
-            cache_count = len(self._image_cache)
                 
         status_color = "success" if self._enabled else "error"
         status_text = "运行中" if self._enabled else "已停止"
@@ -381,9 +377,8 @@ class MediaServerMsgAI(_PluginBase):
             {
                 'component': 'VRow',
                 'content': [
-                    self._build_stat_card("累计处理次数", str(self._total_events), "mdi-history", "primary", md=4),
-                    self._build_stat_card("TMDB 图片缓存", str(cache_count), "mdi-image-multiple", "info", md=4),
-                    self._build_stat_card("插件状态", status_text, "mdi-play-circle", status_color, md=4),
+                    self._build_stat_card("累计处理", f"{self._total_events}次", "mdi-history", "primary", tooltip="插件启动后累计处理的 Webhook 事件总数", md=6),
+                    self._build_stat_card("插件状态", status_text, "mdi-play-circle", status_color, tooltip=f"插件当前{'运行中' if self._enabled else '已停止'}", md=6),
                 ]
             },
             # --- 第二行：主体区域 ---
@@ -405,10 +400,22 @@ class MediaServerMsgAI(_PluginBase):
                                             {'component': 'VCardTitle', 'text': '🛠️ 核心配置'},
                                             {'component': 'VDivider'},
                                             {'component': 'VCardText', 'content': [
-                                                self._render_info_item("媒体服务器", "、".join(self._mediaservers or ["未选择"])),
-                                                self._render_info_item("剧集聚合", f"{self._aggregate_time}s" if self._aggregate_enabled else "已禁用"),
-                                                self._render_info_item("智能分类", "✅ 开启" if self._smart_category_enabled else "❌ 关闭"),
-                                                self._render_info_item("未识别过滤", "🛡️ 开启" if self._filter_unrecognized else "🔓 关闭"),
+                                                {'component': 'VList', 'props': {'density': 'compact', 'class': 'bg-transparent'}, 'content': [
+                                                    self._render_info_item("媒体服务器", "、".join(self._mediaservers or ["未选择"])),
+                                                    self._render_info_item("剧集聚合", f"{self._aggregate_time}s" if self._aggregate_enabled else "已禁用"),
+                                                    {'component': 'VListItem', 'props': {'class': 'px-0'}, 'content': [
+                                                        {'component': 'VListItemTitle', 'props': {'class': 'text-grey-darken-1'}, 'text': '智能分类'},
+                                                        {'component': 'VListItemAction', 'content': [
+                                                            {'component': 'VSwitch', 'props': {'model_value': self._smart_category_enabled, 'readonly': True, 'density': 'compact', 'color': 'primary', 'inset': True}}
+                                                        ]}
+                                                    ]},
+                                                    {'component': 'VListItem', 'props': {'class': 'px-0'}, 'content': [
+                                                        {'component': 'VListItemTitle', 'props': {'class': 'text-grey-darken-1'}, 'text': '未识别过滤'},
+                                                        {'component': 'VListItemAction', 'content': [
+                                                            {'component': 'VSwitch', 'props': {'model_value': self._filter_unrecognized, 'readonly': True, 'density': 'compact', 'color': 'primary', 'inset': True}}
+                                                        ]}
+                                                    ]}
+                                                ]}
                                             ]}
                                         ]}
                                     ]},
@@ -417,7 +424,7 @@ class MediaServerMsgAI(_PluginBase):
                                         {'component': 'VCard', 'props': {'variant': 'flat', 'class': 'fill-height'}, 'content': [
                                             {'component': 'VCardTitle', 'text': '📡 最新事件'},
                                             {'component': 'VDivider'},
-                                            {'component': 'VCardText', 'content': self._build_event_detail(last_event)}
+                                            {'component': 'VCardText', 'props': {'class': 'd-flex align-center justify-center fill-height'}, 'content': self._build_event_detail(last_event)}
                                         ]}
                                     ]}
                                 ]
@@ -430,17 +437,17 @@ class MediaServerMsgAI(_PluginBase):
                                     {
                                         'component': 'VTable', 'props': {'density': 'compact'}, 'content': [
                                             {'component': 'thead', 'content': [{'component': 'tr', 'content': [
-                                                {'component': 'th', 'text': '时间'}, {'component': 'th', 'text': '事件'},
-                                                {'component': 'th', 'text': '媒体名称'}, {'component': 'th', 'text': '结果'}
+                                                {'component': 'th', 'text': '时间'}, {'component': 'th', 'text': '事件'}, {'component': 'th', 'text': '用户'},
+                                                {'component': 'th', 'text': '媒体名称'}
                                             ]}]},
                                             {'component': 'tbody', 'content': [
                                                 {'component': 'tr', 'content': [
                                                     {'component': 'td', 'text': h.get('time', '')[11:]},
                                                     {'component': 'td', 'text': h.get('action', '通知')},
-                                                    {'component': 'td', 'props': {'class': 'text-truncate', 'style': 'max-width: 250px'}, 'text': h.get('media', '-')},
-                                                    {'component': 'td', 'content': [{'component': 'VChip', 'props': {'color': 'success', 'size': 'x-small'}, 'text': '已处理'}]}
+                                                    {'component': 'td', 'props': {'class': 'text-truncate', 'style': 'max-width: 80px'}, 'text': h.get('user', '-')},
+                                                    {'component': 'td', 'props': {'class': 'text-truncate', 'style': 'max-width: 200px'}, 'text': h.get('media', '-')}
                                                 ]} for h in history
-                                            ] if history else [{'component': 'tr', 'content': [{'component': 'td', 'props': {'colspan': 4, 'class': 'text-center pa-4'}, 'text': '暂无历史记录'}]}]}
+                                            ] if history else [{'component': 'tr', 'content': [{'component': 'td', 'props': {'colspan': 4, 'class': 'text-center pa-4 text-grey'}, 'text': '当事件被处理时，这里会显示记录'}]}]}
                                         ]
                                     }
                                 ]
@@ -465,10 +472,10 @@ class MediaServerMsgAI(_PluginBase):
                                     {'component': 'VImg', 'props': {
                                         'src': last_notify.get('image'), 'height': '240', 'cover': True, 'class': 'bg-grey-lighten-2',
                                         'show': bool(last_notify.get('image') and 'http' in last_notify.get('image'))
-                                    }} if last_notify.get('image') else {'component': 'VSpacer'},
+                                    }} if last_notify.get('image') else {'component': 'div', 'props': {'class': 'd-flex align-center justify-center bg-grey-lighten-2', 'style': 'height: 240px;'}, 'content': [{'component': 'VIcon', 'props': {'icon': 'mdi-image-off', 'color': 'grey-lighten-1', 'size': 'x-large'}}]},
                                     {'component': 'VCardText', 'props': {'class': 'flex-grow-1'}, 'content': [
-                                        {'component': 'div', 'props': {'class': 'text-subtitle-1 font-weight-bold mb-2'}, 'text': last_notify.get('title', '等待入库...')},
-                                        {'component': 'div', 'props': {'class': 'text-body-2', 'style': 'white-space: pre-line'}, 'text': last_notify.get('text', '-')}
+                                        {'component': 'div', 'props': {'class': 'text-subtitle-1 font-weight-bold mb-2'}, 'text': last_notify.get('title') or '等待通知'},
+                                        {'component': 'div', 'props': {'class': 'text-body-2', 'style': 'white-space: pre-line'}, 'text': last_notify.get('text') or '当有媒体入库或播放时，这里会实时预览通知内容。'}
                                     ]}
                                 ]
                             }
@@ -487,61 +494,49 @@ class MediaServerMsgAI(_PluginBase):
             return text[:limit].rstrip() + '...'
         return text
 
-    def _build_stat_card(self, title: str, value: str, icon: str, color: str, md: int = 4) -> dict:
-            """构建统计卡片，md 参数决定它占几分之十二的宽度"""
-            return {
-                'component': 'VCol',
-                'props': {'cols': 12, 'sm': 6, 'md': md}, 
-                'content': [
-                    {
-                        'component': 'VCard',
-                        'props': {'color': color, 'variant': 'tonal', 'class': 'fill-height'},
-                        'content': [
-                            {
-                                'component': 'VListItems',
-                                'props': {'align': 'center', 'class': 'pa-2'},
-                                'content': [
-                                    {'component': 'VIcon', 'props': {'icon': icon, 'size': 'large', 'class': 'mr-2'}},
-                                    {
-                                        'component': 'div',
-                                        'content': [
-                                            {'component': 'div', 'props': {'class': 'text-caption'}, 'text': title},
-                                            {'component': 'div', 'props': {'class': 'text-h6 font-weight-bold'}, 'text': value}
-                                        ]
-                                    }
-                                ]
-                            }
-                        ]
-                    }
-                ]
-            }
+    def _build_stat_card(self, title: str, value: str, icon: str, color: str, tooltip: str = '', md: int = 4) -> dict:
+        """构建统计卡片"""
+        return {
+            'component': 'VCol',
+            'props': {'cols': 12, 'sm': 6, 'md': md},
+            'content': [
+                {'component': 'VCard', 'props': {'variant': 'tonal', 'class': 'fill-height'}, 'content': [
+                    {'component': 'div', 'content': [
+                        {'component': 'VCardText', 'props': {'class': 'd-flex align-center'}, 'content': [
+                            {'component': 'VIcon', 'props': {'icon': icon, 'size': 'large', 'color': color, 'class': 'mr-4'}},
+                            {'component': 'div', 'content': [
+                                {'component': 'div', 'props': {'class': 'text-caption text-grey'}, 'text': title},
+                                {'component': 'div', 'props': {'class': 'text-h6 font-weight-bold'}, 'text': value}
+                            ]}
+                        ]}
+                    ]},
+                    {'component': 'VTooltip', 'props': {'activator': 'parent', 'location': 'top'}, 'text': tooltip}
+                ]}
+            ]
+        }
 
     def _render_info_item(self, label: str, value: str) -> dict:
-        """渲染名值对"""
+        """渲染 VList 名值对"""
         return {
-            'component': 'div',
-            'props': {'class': 'd-flex justify-space-between mb-1'},
+            'component': 'VListItem',
+            'props': {'class': 'px-0'},
             'content': [
-                {'component': 'span', 'props': {'class': 'text-grey-darken-1'}, 'text': f"{label}:"},
-                {'component': 'span', 'props': {'class': 'font-weight-medium'}, 'text': value}
+                {'component': 'VListItemTitle', 'props': {'class': 'text-grey-darken-1'}, 'text': label},
+                {'component': 'VListItemSubtitle', 'props': {'class': 'font-weight-medium text-wrap'}, 'text': value}
             ]
         }
 
     def _build_event_detail(self, event: dict) -> List[dict]:
-        """构建事件详情列表"""
+        """构建事件详情列表，无事件则显示空状态"""
         if not event:
-            return [{'component': 'div', 'props': {'class': 'text-center py-4 text-grey'}, 'text': '等待事件触发...'}]
-        
-        return [
-            self._render_info_item("触发时间", event.get('time', '-')),
-            self._render_info_item("操作类型", event.get('action', '-')),
-            self._render_info_item("媒体名称", event.get('media', '-')),
-            self._render_info_item("所属服务器", event.get('server', '-')),
-            self._render_info_item("TMDB ID", event.get('tmdb_id', '-')),
-            {'component': 'VDivider', 'props': {'class': 'my-2'}},
-            {'component': 'div', 'props': {'class': 'text-caption text-grey-darken-1'}, 'text': "路径地址:"},
-            {'component': 'div', 'props': {'class': 'text-caption text-truncate', 'title': event.get('path')}, 'text': event.get('path', '-')}
-        ]
+            return [{'component': 'div', 'props': {'class': 'text-center text-grey'}, 'text': '当有新的 Webhook 事件触发时，这里将显示其详细信息。'}]
+        return [{'component': 'VList', 'props': {'density': 'compact', 'class': 'bg-transparent'}, 'content': [
+                self._render_info_item("时间", event.get('time', '-')),
+                self._render_info_item("类型", event.get('action', '-')),
+                self._render_info_item("用户", event.get('user', '-')),
+                self._render_info_item("媒体", event.get('media', '-')),
+                self._render_info_item("路径", event.get('path', '-'))
+        ]}]
 
     def _set_last_event_snapshot(self, event_info: WebhookEventInfo):
         item_path = event_info.item_path or ''
@@ -1419,48 +1414,29 @@ class MediaServerMsgAI(_PluginBase):
             pass
         return None
 
-    def _cache_image_result(self, key: str, image_url: Optional[str]):
-        expires_at = 0 if image_url else time.time() + self.IMAGE_NEGATIVE_CACHE_TTL
-        with self._lock:
-            self._image_cache[key] = (image_url, expires_at)
-            if len(self._image_cache) > self.IMAGE_CACHE_MAX_SIZE:
-                self._image_cache.popitem(last=False)
-
     def _get_tmdb_image(self, event_info: WebhookEventInfo, mtype: MediaType) -> Optional[str]:
-        """获取TMDB图片（带OrderedDict LRU缓存）"""
-        key = f"{event_info.tmdb_id}_{event_info.season_id}_{event_info.episode_id}"
-
-        with self._lock:
-            cached = self._image_cache.get(key)
-            if cached:
-                self._image_cache.move_to_end(key)
-                image_url, expires_at = cached
-                if image_url or expires_at > time.time():
-                    return image_url
-                self._image_cache.pop(key, None)
-
+        """
+        获取TMDB图片。
+        注意：插件自身的内存缓存已移除，完全依赖 MoviePilot 核心的 self.chain.obtain_specific_image 缓存机制。
+        """
         try:
+            # 优先获取横版背景图 (Backdrop)
             img = self.chain.obtain_specific_image(
                 mediaid=event_info.tmdb_id, mtype=mtype,
                 image_type=MediaImageType.Backdrop,
                 season=event_info.season_id, episode=event_info.episode_id
             )
-
+            # 若无背景图，回退到竖版海报图 (Poster)
             if not img:
                 img = self.chain.obtain_specific_image(
                     mediaid=event_info.tmdb_id, mtype=mtype,
                     image_type=MediaImageType.Poster,
                     season=event_info.season_id, episode=event_info.episode_id
                 )
-
-            self._cache_image_result(key, img)
             return img
-
         except Exception as e:
-            self._cache_image_result(key, None)
             logger.error(f"获取TMDB图片异常: {str(e)}")
-
-        return None
+            return None
 
     def _get_category_from_path(self, path: str, item_type: str, is_folder: bool = False) -> str:
         """从路径获取分类"""
@@ -1700,7 +1676,6 @@ class MediaServerMsgAI(_PluginBase):
 
             with self._lock:
                 self._webhook_msg_keys.clear()
-                self._image_cache.clear()
                 self._service_infos_cache = (None, 0.0)
                 self._series_tmdb_cache.clear()
                 self._series_tmdb_inflight.clear()
