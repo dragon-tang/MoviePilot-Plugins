@@ -440,7 +440,7 @@ class MediaServerMsgAI(_PluginBase):
                                                     {'component': 'td', 'props': {'class': 'text-truncate', 'style': 'max-width: 250px'}, 'text': h.get('media', '-')},
                                                     {'component': 'td', 'content': [{'component': 'VChip', 'props': {'color': 'success', 'size': 'x-small'}, 'text': '已处理'}]}
                                                 ]} for h in history
-                                            ] if history else [{'component': 'tr', 'content': [{'component': 'td', 'props': {'colspan': 5, 'class': 'text-center pa-4'}, 'text': '暂无历史记录'}]}]}
+                                            ] if history else [{'component': 'tr', 'content': [{'component': 'td', 'props': {'colspan': 4, 'class': 'text-center pa-4'}, 'text': '暂无历史记录'}]}]}
                                         ]
                                     }
                                 ]
