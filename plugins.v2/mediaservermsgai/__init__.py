@@ -54,7 +54,7 @@ class MediaServerMsgAI(_PluginBase):
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "2.1.3"
+    plugin_version = "2.1.4"
     plugin_author = "dragon-tang"
     author_url = "https://github.com/dragon-tang"
     plugin_config_prefix = "mediaservermsgai_"
@@ -368,13 +368,13 @@ class MediaServerMsgAI(_PluginBase):
                                                     {'component': 'VListItem', 'props': {'class': 'px-0'}, 'content': [
                                                         {'component': 'VListItemTitle', 'props': {'class': 'text-grey-darken-1'}, 'text': '智能分类'},
                                                         {'component': 'VListItemAction', 'content': [
-                                                            {'component': 'VChip', 'props': {'color': 'primary' if self._smart_category_enabled else 'default', 'size': 'small', 'text': '开启' if self._smart_category_enabled else '关闭', 'variant': 'tonal'}}
+                                                            {'component': 'div', 'props': {'class': 'text-body-2 font-weight-medium'}, 'text': '开启' if self._smart_category_enabled else '关闭'}
                                                         ]}
                                                     ]},
                                                     {'component': 'VListItem', 'props': {'class': 'px-0'}, 'content': [
                                                         {'component': 'VListItemTitle', 'props': {'class': 'text-grey-darken-1'}, 'text': '未识别过滤'},
                                                         {'component': 'VListItemAction', 'content': [
-                                                            {'component': 'VChip', 'props': {'color': 'primary' if self._filter_unrecognized else 'default', 'size': 'small', 'text': '开启' if self._filter_unrecognized else '关闭', 'variant': 'tonal'}}
+                                                            {'component': 'div', 'props': {'class': 'text-body-2 font-weight-medium'}, 'text': '开启' if self._filter_unrecognized else '关闭'}
                                                         ]}
                                                     ]}
                                                 ]}
@@ -446,7 +446,6 @@ class MediaServerMsgAI(_PluginBase):
                 ]
             }
         ]
-
     @staticmethod
     def _short_page_text(value: Any, limit: int = 120, default: str = '-') -> str:
         text = str(value).strip() if value is not None else ''
@@ -456,7 +455,7 @@ class MediaServerMsgAI(_PluginBase):
             return text[:limit].rstrip() + '...'
         return text
 
-    def _build_stat_card(self, title: str, value: str, icon: str, color: str, tooltip: str = '', md: int = 4) -> dict:
+    def _build_stat_card(self, title: str, value: str, icon: str, color: str, tooltip: str = '', cols: int = 12, md: int = 4) -> dict:
         """构建统计卡片"""
         return {
             'component': 'VCol',
