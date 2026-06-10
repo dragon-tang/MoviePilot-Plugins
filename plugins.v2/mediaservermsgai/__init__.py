@@ -770,8 +770,8 @@ class MediaServerMsgAI(_PluginBase):
 
     def _handle_deep_delete_event(self, event_info: WebhookEventInfo):
         """处理神医助手媒体深度删除消息"""
-        item_name = event_info.item_name or "未知媒体"
-        item_path = event_info.item_path or ""
+        item_name = self._short_page_text(event_info.item_name, 120, "未知媒体")
+        item_path = self._short_page_text(event_info.item_path, 300, "")
 
         mount_paths = []
         if event_info.json_object and isinstance(event_info.json_object, dict):
@@ -811,8 +811,10 @@ class MediaServerMsgAI(_PluginBase):
 
         if mount_paths:
             texts.extend(["", "💾 挂载路径："])
-            for path in mount_paths:
-                texts.append(f"• {path}")
+            for path in mount_paths[:5]:
+                texts.append(f"• {self._short_page_text(path, 200, '')}")
+            if len(mount_paths) > 5:
+                texts.append(f"… 及其他 {len(mount_paths) - 5} 条路径")
 
         self._send_notification(
             title="🗑️ 神医助手 - 媒体深度删除",
