@@ -23,7 +23,7 @@
       "v2.0.0": "兼容神医助手深度删除通知"
     }
   },
-  "EmbyReverseProxy": {
+  "EmbyReverseProxyAI": {
     "name": "Emby 302 反向代理AI版",
     "description": "Emby 302 反向代理，自动代理 HTTP 链接，跳转最终地址，支持外部播放器调用；AI版支持向 Emby 传递真实客户端 IP。",
     "labels": "云盘,媒体",

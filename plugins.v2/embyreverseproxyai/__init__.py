@@ -48,7 +48,7 @@ def _parse_pin_rules(raw: str) -> List[Tuple[str, str]]:
     return result
 
 
-class EmbyReverseProxy(_PluginBase):
+class EmbyReverseProxyAI(_PluginBase):
     """
     Emby 302 反向代理
     """
@@ -61,7 +61,7 @@ class EmbyReverseProxy(_PluginBase):
     plugin_version = "0.2.4"
     plugin_author = "DDSRem"
     author_url = "https://github.com/DDSRem"
-    plugin_config_prefix = "embyreverseproxy_"
+    plugin_config_prefix = "embyreverseproxyai_"
     plugin_order = 20
     auth_level = 1
 
