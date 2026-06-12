@@ -48,6 +48,18 @@ def _parse_pin_rules(raw: str) -> List[Tuple[str, str]]:
     return result
 
 
+def _parse_region_block_rules(raw: str) -> List[str]:
+    """
+    解析地区拦截关键词，支持换行、英文逗号、中文逗号、分号分隔
+
+    :param raw: 原始地区关键词文本
+    :return: 地区关键词列表
+    """
+    text = (raw or "").replace("，", "\n").replace(",", "\n")
+    text = text.replace("；", "\n").replace(";", "\n")
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
 class EmbyReverseProxyAI(_PluginBase):
     """
     Emby 302 反向代理
@@ -55,10 +67,10 @@ class EmbyReverseProxyAI(_PluginBase):
 
     plugin_name = "Emby 302 反向代理AI版"
     plugin_desc = (
-        "Emby 302 反向代理，自动代理 HTTP 链接，跳转最终地址，支持外部播放器调用。"
+        "Emby 302 反向代理，自动代理 HTTP 链接，跳转最终地址，支持外部播放器调用和地区拦截。"
     )
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/refs/heads/main/icons/Emby_A.png"
-    plugin_version = "0.2.4"
+    plugin_version = "0.2.5"
     plugin_author = "DDSRem"
     author_url = "https://github.com/DDSRem"
     plugin_config_prefix = "embyreverseproxyai_"
@@ -73,6 +85,9 @@ class EmbyReverseProxyAI(_PluginBase):
     _pin_rules_raw = ""
     _external_player_url = False
     _external_player_list: List[str] = []
+    _region_block_enabled = False
+    _region_block_rules_raw = ""
+    _region_block_rules: List[str] = []
     _server = None
     _thread = None
 
@@ -94,6 +109,11 @@ class EmbyReverseProxyAI(_PluginBase):
             self._pin_rules = _parse_pin_rules(self._pin_rules_raw)
             self._external_player_url = config.get("external_player_url", False)
             self._external_player_list = config.get("external_player_list") or []
+            self._region_block_enabled = config.get("region_block_enabled", False)
+            self._region_block_rules_raw = (config.get("region_block_rules") or "").strip()
+            self._region_block_rules = _parse_region_block_rules(
+                self._region_block_rules_raw
+            )
             self._update_config()
 
         self.stop_service()
@@ -106,6 +126,8 @@ class EmbyReverseProxyAI(_PluginBase):
                 pin_rules=self._pin_rules,
                 external_player_url=self._external_player_url,
                 external_player_list=self._external_player_list,
+                region_block_enabled=self._region_block_enabled,
+                region_block_rules=self._region_block_rules,
             )
             try:
                 uv_config = Config(
@@ -143,6 +165,8 @@ class EmbyReverseProxyAI(_PluginBase):
                 "pin_rules": self._pin_rules_raw,
                 "external_player_url": self._external_player_url,
                 "external_player_list": self._external_player_list,
+                "region_block_enabled": self._region_block_enabled,
+                "region_block_rules": self._region_block_rules_raw,
             }
         )
 
@@ -239,6 +263,21 @@ class EmbyReverseProxyAI(_PluginBase):
                             }
                         ],
                     },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 4},
+                        "content": [
+                            {
+                                "component": "VSwitch",
+                                "props": {
+                                    "model": "region_block_enabled",
+                                    "label": "地区拦截",
+                                    "hint": "开启后按客户端 IP 归属地拦截访问",
+                                    "persistent-hint": True,
+                                },
+                            }
+                        ],
+                    },
                 ],
             },
             {
@@ -328,6 +367,28 @@ class EmbyReverseProxyAI(_PluginBase):
                             {
                                 "component": "VTextarea",
                                 "props": {
+                                    "model": "region_block_rules",
+                                    "label": "拦截地区",
+                                    "rows": 3,
+                                    "placeholder": "每行或用逗号分隔：深圳市，广州市",
+                                    "hint": "开启地区拦截后，使用 WebUtils.get_location() 查询客户端 IP 归属地；归属地包含任一关键词时返回 403。示例：深圳市，广州市",
+                                    "persistent-hint": True,
+                                },
+                            }
+                        ],
+                    },
+                ],
+            },
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12},
+                        "content": [
+                            {
+                                "component": "VTextarea",
+                                "props": {
                                     "model": "pin_rules",
                                     "label": "顶置路径规则",
                                     "rows": 4,
@@ -348,4 +409,6 @@ class EmbyReverseProxyAI(_PluginBase):
             "pin_rules": "",
             "external_player_url": False,
             "external_player_list": [],
+            "region_block_enabled": False,
+            "region_block_rules": "",
         }
