@@ -25,7 +25,6 @@ from starlette.requests import ClientDisconnect
 from websockets import connect
 
 from app.log import logger
-from app.utils.web import WebUtils
 
 from .external_players import (
     ALL_EXTERNAL_PLAYER_KEYS,
@@ -42,7 +41,6 @@ PLAYBACK_URL_CACHE_TTL_SECONDS = 90
 PLAYBACK_USER_CACHE_TTL_SECONDS = 300
 PLAYBACK_URL_CACHE_MAX_SIZE = 500
 PLAYBACK_STRM_CACHE_TTL_SECONDS = 300
-REGION_BLOCK_LOCATION_CACHE_TTL_SECONDS = 3600
 REDIRECT_RESOLVE_TIMEOUTS = ((3.0, 10.0), (3.0, 15.0), (5.0, 20.0))
 
 CACHE_KEY_HEADERS = (
@@ -154,8 +152,6 @@ def create_app(
     pin_rules: List[Tuple[str, str]] | None = None,
     external_player_url: bool = False,
     external_player_list: List[str] | None = None,
-    region_block_enabled: bool = False,
-    region_block_rules: List[str] | None = None,
 ) -> FastAPI:
     """
     创建 Emby 反向代理 FastAPI 应用
@@ -164,19 +160,11 @@ def create_app(
     :param pin_rules (List): 顶置路径规则列表 (路径前缀, 目标URL)；命中时先替换再 302
     :param external_player_url (bool): 是否启用外部播放器链接注入
     :param external_player_list (List): 要注入的外部播放器 key 列表；为空时使用全部
-    :param region_block_enabled (bool): 是否启用地区拦截
-    :param region_block_rules (List): 地区关键词列表，命中 WebUtils.get_location() 结果则拒绝访问
 
     :return FastAPI: 配置好的 FastAPI 应用实例
     """
     emby_host = emby_host.rstrip("/")
     pin_rules = pin_rules or []
-    _region_block_enabled = bool(region_block_enabled)
-    _region_block_rules = [
-        str(rule).strip()
-        for rule in (region_block_rules or [])
-        if str(rule).strip()
-    ]
     if external_player_url:
         _player_keys = (
             [k for k in external_player_list if k in EXTERNAL_PLAYERS]
@@ -361,8 +349,6 @@ def create_app(
         app.state.strm_source_lock = Lock()
         app.state.playback_user_cache = {}
         app.state.playback_user_lock = Lock()
-        app.state.region_location_cache = {}
-        app.state.region_location_lock = Lock()
         yield
         await app.state.http_client_follow.aclose()
         await app.state.http_client_no_follow.aclose()
@@ -376,85 +362,6 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
-
-    def _region_block_match(location: str) -> str | None:
-        """
-        判断地区字符串是否命中拦截关键词
-
-        :param location: WebUtils.get_location 返回的地区字符串
-        :return: 命中的关键词；未命中则返回 None
-        """
-        if not location:
-            return None
-        location_lower = location.lower()
-        for rule in _region_block_rules:
-            if rule in location or rule.lower() in location_lower:
-                return rule
-        return None
-
-    async def _get_region_block_location(request: Request, client_ip: str) -> str:
-        """
-        获取客户端 IP 归属地，并做短期缓存，避免每个请求都查库
-
-        :param request: 当前请求
-        :param client_ip: request.client.host 获取到的直连客户端 IP
-        :return: 归属地字符串
-        """
-        now = monotonic()
-        cache = request.app.state.region_location_cache
-        lock = request.app.state.region_location_lock
-        async with lock:
-            entry = cache.get(client_ip)
-            if entry:
-                location, expiry_ts = entry
-                if now < expiry_ts:
-                    return location
-                cache.pop(client_ip, None)
-
-        location = WebUtils.get_location(client_ip) or ""
-        async with lock:
-            cache[client_ip] = (
-                location,
-                now + REGION_BLOCK_LOCATION_CACHE_TTL_SECONDS,
-            )
-        return location
-
-    @app.middleware("http")
-    async def region_block_middleware(request: Request, call_next):
-        """
-        地区拦截中间件：直连 8099 时使用 request.client.host 查询地区并拦截
-        """
-        if not _region_block_enabled or not _region_block_rules:
-            return await call_next(request)
-
-        client_ip = request.client.host if request.client else ""
-        if not client_ip:
-            return await call_next(request)
-
-        try:
-            location = await _get_region_block_location(request, client_ip)
-        except Exception:
-            logger.warning("地区拦截查询归属地失败: ip=%s", client_ip, exc_info=True)
-            return await call_next(request)
-
-        matched_rule = _region_block_match(location)
-        if not matched_rule:
-            return await call_next(request)
-
-        logger.warning(
-            "地区拦截: ip=%s, location=%s, rule=%s, path=%s",
-            client_ip,
-            location,
-            matched_rule,
-            request.scope.get("path", ""),
-        )
-        return JSONResponse(
-            status_code=403,
-            content={
-                "error": "Forbidden",
-                "detail": "当前地区不允许访问",
-            },
-        )
 
     @app.middleware("http")
     async def path_to_lower_middleware(request: Request, call_next):
