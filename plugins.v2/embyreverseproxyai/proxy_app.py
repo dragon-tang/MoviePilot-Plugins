@@ -44,6 +44,7 @@ PLAYBACK_USER_CACHE_TTL_SECONDS = 300
 PLAYBACK_URL_CACHE_MAX_SIZE = 500
 PLAYBACK_STRM_CACHE_TTL_SECONDS = 300
 REGION_BLOCK_LOCATION_CACHE_TTL_SECONDS = 86400
+REGION_BLOCK_LOCATION_CACHE_MAX_SIZE = 2000
 REDIRECT_RESOLVE_TIMEOUTS = ((3.0, 10.0), (3.0, 15.0), (5.0, 20.0))
 
 CACHE_KEY_HEADERS = (
@@ -173,11 +174,11 @@ def create_app(
     emby_host = emby_host.rstrip("/")
     pin_rules = pin_rules or []
     _region_block_enabled = bool(region_block_enabled)
-    _region_block_rules = [
-        str(rule).strip()
-        for rule in (region_block_rules or [])
-        if str(rule).strip()
-    ]
+    _region_block_rules: list[tuple[str, str]] = []
+    for rule in region_block_rules or []:
+        rule_text = str(rule).strip()
+        if rule_text:
+            _region_block_rules.append((rule_text, rule_text.lower()))
     if external_player_url:
         _player_keys = (
             [k for k in external_player_list if k in EXTERNAL_PLAYERS]
@@ -363,6 +364,7 @@ def create_app(
         app.state.playback_user_cache = {}
         app.state.playback_user_lock = Lock()
         app.state.region_location_cache = {}
+        app.state.region_location_cache_order = []
         app.state.region_location_lock = Lock()
         yield
         await app.state.http_client_follow.aclose()
@@ -388,8 +390,8 @@ def create_app(
         if not location:
             return None
         location_lower = location.lower()
-        for rule in _region_block_rules:
-            if rule in location or rule.lower() in location_lower:
+        for rule, rule_lower in _region_block_rules:
+            if rule in location or rule_lower in location_lower:
                 return rule
         return None
 
@@ -421,6 +423,7 @@ def create_app(
         """
         now = monotonic()
         cache = request.app.state.region_location_cache
+        order = request.app.state.region_location_cache_order
         lock = request.app.state.region_location_lock
         async with lock:
             entry = cache.get(client_ip)
@@ -429,13 +432,37 @@ def create_app(
                 if now < expiry_ts:
                     return location
                 cache.pop(client_ip, None)
+                try:
+                    order.remove(client_ip)
+                except ValueError:
+                    pass
 
         location = WebUtils.get_location(client_ip) or ""
+        now = monotonic()
         async with lock:
+            expired = [
+                k for k in order if cache.get(k) and cache[k][1] < now
+            ]
+            for k in expired:
+                cache.pop(k, None)
+            if expired:
+                expired_set = frozenset(expired)
+                order[:] = [k for k in order if k in cache and k not in expired_set]
+            else:
+                order[:] = [k for k in order if k in cache]
+            if client_ip in cache:
+                try:
+                    order.remove(client_ip)
+                except ValueError:
+                    pass
+            while len(cache) >= REGION_BLOCK_LOCATION_CACHE_MAX_SIZE and order:
+                oldest = order.pop(0)
+                cache.pop(oldest, None)
             cache[client_ip] = (
                 location,
                 now + REGION_BLOCK_LOCATION_CACHE_TTL_SECONDS,
             )
+            order.append(client_ip)
         return location
 
     @app.middleware("http")

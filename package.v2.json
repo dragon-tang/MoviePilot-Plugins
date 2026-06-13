@@ -27,11 +27,12 @@
     "name": "Emby 302 反向代理AI版",
     "description": "Emby 302 反向代理，自动代理 HTTP 链接，跳转最终地址，支持外部播放器调用、真实客户端 IP 转发和地区拦截。",
     "labels": "云盘,媒体",
-    "version": "0.2.6",
+    "version": "0.2.7",
     "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/refs/heads/main/icons/Emby_A.png",
     "author": "DDSRem",
     "level": 1,
     "history": {
+      "v0.2.7": "优化地区拦截：增加归属地缓存上限，避免公网扫描导致缓存无限增长；启动时做规则预处理，减少请求时匹配开销。",
       "v0.2.6": "优化地区拦截：本地 / 内网 IP 直接放行，不调用 WebUtils.get_location()。",
       "v0.2.5": "新增地区拦截开关和拦截地区填写框，使用 WebUtils.get_location() 按真实客户端 IP 归属地关键词匹配，命中后返回 403；归属地查询结果缓存 24 小时。",
       "v0.2.4": "新增真实客户端 IP 转发：直连 8099 时使用 TCP 对端地址写入 X-Real-IP / X-Forwarded-For，使 Emby 登录通知显示真实来源 IP。",
