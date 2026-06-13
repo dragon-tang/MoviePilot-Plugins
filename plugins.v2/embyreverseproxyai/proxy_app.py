@@ -1,6 +1,7 @@
 from asyncio import Lock, gather
 from contextlib import asynccontextmanager
 from hashlib import sha256
+from ipaddress import ip_address
 from re import IGNORECASE, compile as re_compile, search as re_search, sub as re_sub
 from time import monotonic
 from typing import Any, List, Tuple
@@ -392,6 +393,24 @@ def create_app(
                 return rule
         return None
 
+    def _is_local_or_private_ip(client_ip: str) -> bool:
+        """
+        判断是否为本地 / 内网地址；这类地址不查地区，直接放行
+
+        :param client_ip: request.client.host 获取到的直连客户端 IP
+        :return: True 表示本地 / 内网地址
+        """
+        try:
+            ip_obj = ip_address(client_ip)
+        except ValueError:
+            return False
+        return (
+            ip_obj.is_private
+            or ip_obj.is_loopback
+            or ip_obj.is_link_local
+            or ip_obj.is_unspecified
+        )
+
     async def _get_region_block_location(request: Request, client_ip: str) -> str:
         """
         获取客户端 IP 归属地，并做 24 小时缓存，避免每个请求都查库
@@ -429,6 +448,8 @@ def create_app(
 
         client_ip = request.client.host if request.client else ""
         if not client_ip:
+            return await call_next(request)
+        if _is_local_or_private_ip(client_ip):
             return await call_next(request)
 
         try:
