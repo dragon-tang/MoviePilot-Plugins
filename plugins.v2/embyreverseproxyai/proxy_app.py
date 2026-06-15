@@ -108,6 +108,8 @@ CROSS_ORIGIN_VALUE_RE = re_compile(
     r'\w+\.IsRemote\s*&&\s*"DirectPlay"\s*===\s*\w+\s*\?\s*null\s*:\s*"anonymous"'
 )
 
+EMBY_AUTH_FIELD_RE = re_compile(r'([A-Za-z0-9_-]+)="([^"]*)"')
+
 CROSS_ORIGIN_INTERCEPT_MARKER = "[EmbyReverseProxy] crossOrigin"
 
 CROSS_ORIGIN_INTERCEPT_SCRIPT = (
@@ -158,6 +160,8 @@ def create_app(
     external_player_list: List[str] | None = None,
     region_block_enabled: bool = False,
     region_block_rules: List[str] | None = None,
+    client_device_whitelist_enabled: bool = False,
+    client_device_whitelist: List[Tuple[str, str]] | None = None,
 ) -> FastAPI:
     """
     创建 Emby 反向代理 FastAPI 应用
@@ -168,11 +172,20 @@ def create_app(
     :param external_player_list (List): 要注入的外部播放器 key 列表；为空时使用全部
     :param region_block_enabled (bool): 是否启用地区拦截
     :param region_block_rules (List): 地区关键词列表，命中 WebUtils.get_location() 结果则拒绝访问
+    :param client_device_whitelist_enabled (bool): 是否启用客户端 + 设备白名单
+    :param client_device_whitelist (List): 白名单规则列表 (客户端名, DeviceId)
 
     :return FastAPI: 配置好的 FastAPI 应用实例
     """
     emby_host = emby_host.rstrip("/")
     pin_rules = pin_rules or []
+    _client_device_whitelist_enabled = bool(client_device_whitelist_enabled)
+    _client_device_whitelist: set[tuple[str, str]] = set()
+    for client_name, device_id in client_device_whitelist or []:
+        client_name = str(client_name).strip()
+        device_id = str(device_id).strip()
+        if client_name and device_id:
+            _client_device_whitelist.add((client_name.casefold(), device_id.casefold()))
     _region_block_enabled = bool(region_block_enabled)
     _region_block_rules: list[tuple[str, str]] = []
     for rule in region_block_rules or []:
@@ -380,21 +393,6 @@ def create_app(
         allow_headers=["*"],
     )
 
-    def _region_block_match(location: str) -> str | None:
-        """
-        判断地区字符串是否命中拦截关键词
-
-        :param location: WebUtils.get_location 返回的地区字符串
-        :return: 命中的关键词；未命中则返回 None
-        """
-        if not location:
-            return None
-        location_lower = location.lower()
-        for rule, rule_lower in _region_block_rules:
-            if rule in location or rule_lower in location_lower:
-                return rule
-        return None
-
     def _is_local_or_private_ip(client_ip: str) -> bool:
         """
         判断是否为本地 / 内网地址；这类地址不查地区，直接放行
@@ -412,6 +410,133 @@ def create_app(
             or ip_obj.is_link_local
             or ip_obj.is_unspecified
         )
+
+    def _query_param_case_insensitive(request: Request, name: str) -> str:
+        """
+        以大小写不敏感方式读取查询参数
+        """
+        name_lower = name.lower()
+        for key, value in request.query_params.multi_items():
+            if key.lower() == name_lower:
+                return value
+        return ""
+
+    def _parse_emby_auth_header(value: str) -> dict[str, str]:
+        """
+        解析 X-Emby-Authorization / Authorization 中的 Client、DeviceId 等字段
+        """
+        if not value:
+            return {}
+        return {
+            match.group(1).lower(): match.group(2)
+            for match in EMBY_AUTH_FIELD_RE.finditer(value)
+        }
+
+    def _extract_client_device(request: Request) -> tuple[str, str]:
+        """
+        从请求头 / 查询参数 / Emby 授权头中提取客户端名和 DeviceId
+        """
+        auth_fields: dict[str, str] = {}
+        for header_name in ("X-Emby-Authorization", "Authorization"):
+            auth_fields.update(
+                _parse_emby_auth_header(request.headers.get(header_name, ""))
+            )
+
+        client_name = (
+            request.headers.get("X-Emby-Client")
+            or request.headers.get("X-Client")
+            or _query_param_case_insensitive(request, "X-Emby-Client")
+            or _query_param_case_insensitive(request, "Client")
+            or auth_fields.get("client", "")
+        ).strip()
+        device_id = (
+            request.headers.get("X-Emby-Device-Id")
+            or request.headers.get("X-Device-Id")
+            or _query_param_case_insensitive(request, "X-Emby-Device-Id")
+            or _query_param_case_insensitive(request, "DeviceId")
+            or auth_fields.get("deviceid", "")
+        ).strip()
+        return client_name, device_id
+
+    def _should_skip_client_device_whitelist(request: Request) -> bool:
+        """
+        跳过不携带 Emby 客户端身份的静态页面 / 预检请求，避免白名单阻断 Web 壳加载
+        """
+        if request.method == "OPTIONS":
+            return True
+        path = request.scope.get("path", "/").lower()
+        if request.method in ("GET", "HEAD"):
+            if path in ("/", "/web", "/emby/web"):
+                return True
+            if path.startswith(("/web/", "/emby/web/")):
+                return True
+            if path.endswith(
+                (
+                    ".js",
+                    ".css",
+                    ".png",
+                    ".jpg",
+                    ".jpeg",
+                    ".webp",
+                    ".svg",
+                    ".ico",
+                    ".woff",
+                    ".woff2",
+                    ".ttf",
+                    ".map",
+                )
+            ):
+                return True
+        return False
+
+    @app.middleware("http")
+    async def client_device_whitelist_middleware(request: Request, call_next):
+        """
+        客户端 + 设备白名单中间件；本地 / 内网 IP 直接放行
+        """
+        if not _client_device_whitelist_enabled or not _client_device_whitelist:
+            return await call_next(request)
+        if _should_skip_client_device_whitelist(request):
+            return await call_next(request)
+
+        client_ip = request.client.host if request.client else ""
+        if not client_ip or _is_local_or_private_ip(client_ip):
+            return await call_next(request)
+
+        client_name, device_id = _extract_client_device(request)
+        whitelist_key = (client_name.casefold(), device_id.casefold())
+        if client_name and device_id and whitelist_key in _client_device_whitelist:
+            return await call_next(request)
+
+        logger.warning(
+            "客户端设备白名单拦截: ip=%s, client=%s, device_id=%s, path=%s",
+            client_ip,
+            client_name or "未知客户端",
+            device_id or "未知设备",
+            request.scope.get("path", ""),
+        )
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": "Forbidden",
+                "detail": "当前客户端或设备不允许访问",
+            },
+        )
+
+    def _region_block_match(location: str) -> str | None:
+        """
+        判断地区字符串是否命中拦截关键词
+
+        :param location: WebUtils.get_location 返回的地区字符串
+        :return: 命中的关键词；未命中则返回 None
+        """
+        if not location:
+            return None
+        location_lower = location.lower()
+        for rule, rule_lower in _region_block_rules:
+            if rule in location or rule_lower in location_lower:
+                return rule
+        return None
 
     async def _get_region_block_location(request: Request, client_ip: str) -> str:
         """

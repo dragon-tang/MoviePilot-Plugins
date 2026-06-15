@@ -60,6 +60,32 @@ def _parse_region_block_rules(raw: str) -> List[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
+def _parse_client_device_whitelist(raw: str) -> List[Tuple[str, str]]:
+    """
+    解析客户端设备白名单，每行「客户端名 => DeviceId」
+
+    :param raw: 原始白名单文本
+    :return: 白名单规则列表
+    """
+    result: List[Tuple[str, str]] = []
+    for line in (raw or "").strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if "=>" not in line:
+            logger.warning(
+                '客户端设备白名单格式错误，已忽略（需用 "=>" 分隔客户端名与 DeviceId）: %s',
+                line,
+            )
+            continue
+        client_name, device_id = [part.strip() for part in line.split("=>", 1)]
+        if not client_name or not device_id:
+            logger.warning("客户端设备白名单客户端名或 DeviceId 为空，已忽略: %s", line)
+            continue
+        result.append((client_name, device_id))
+    return result
+
+
 class EmbyReverseProxyAI(_PluginBase):
     """
     Emby 302 反向代理
@@ -67,10 +93,10 @@ class EmbyReverseProxyAI(_PluginBase):
 
     plugin_name = "Emby 302 反向代理AI版"
     plugin_desc = (
-        "Emby 302 反向代理，自动代理 HTTP 链接，跳转最终地址，支持外部播放器调用和地区拦截。"
+        "Emby 302 反向代理，自动代理 HTTP 链接，跳转最终地址，支持外部播放器调用、地区拦截和客户端设备白名单。"
     )
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/refs/heads/main/icons/Emby_A.png"
-    plugin_version = "0.2.7"
+    plugin_version = "0.2.8"
     plugin_author = "DDSRem"
     author_url = "https://github.com/DDSRem"
     plugin_config_prefix = "embyreverseproxyai_"
@@ -88,6 +114,9 @@ class EmbyReverseProxyAI(_PluginBase):
     _region_block_enabled = False
     _region_block_rules_raw = ""
     _region_block_rules: List[str] = []
+    _client_device_whitelist_enabled = False
+    _client_device_whitelist_raw = ""
+    _client_device_whitelist: List[Tuple[str, str]] = []
     _server = None
     _thread = None
 
@@ -114,6 +143,15 @@ class EmbyReverseProxyAI(_PluginBase):
             self._region_block_rules = _parse_region_block_rules(
                 self._region_block_rules_raw
             )
+            self._client_device_whitelist_enabled = config.get(
+                "client_device_whitelist_enabled", False
+            )
+            self._client_device_whitelist_raw = (
+                config.get("client_device_whitelist_rules") or ""
+            ).strip()
+            self._client_device_whitelist = _parse_client_device_whitelist(
+                self._client_device_whitelist_raw
+            )
             self._update_config()
 
         self.stop_service()
@@ -128,6 +166,8 @@ class EmbyReverseProxyAI(_PluginBase):
                 external_player_list=self._external_player_list,
                 region_block_enabled=self._region_block_enabled,
                 region_block_rules=self._region_block_rules,
+                client_device_whitelist_enabled=self._client_device_whitelist_enabled,
+                client_device_whitelist=self._client_device_whitelist,
             )
             try:
                 uv_config = Config(
@@ -167,6 +207,8 @@ class EmbyReverseProxyAI(_PluginBase):
                 "external_player_list": self._external_player_list,
                 "region_block_enabled": self._region_block_enabled,
                 "region_block_rules": self._region_block_rules_raw,
+                "client_device_whitelist_enabled": self._client_device_whitelist_enabled,
+                "client_device_whitelist_rules": self._client_device_whitelist_raw,
             }
         )
 
@@ -235,7 +277,7 @@ class EmbyReverseProxyAI(_PluginBase):
                 "content": [
                     {
                         "component": "VCol",
-                        "props": {"cols": 12, "md": 4},
+                        "props": {"cols": 12, "md": 3},
                         "content": [
                             {
                                 "component": "VSwitch",
@@ -250,7 +292,7 @@ class EmbyReverseProxyAI(_PluginBase):
                     },
                     {
                         "component": "VCol",
-                        "props": {"cols": 12, "md": 4},
+                        "props": {"cols": 12, "md": 3},
                         "content": [
                             {
                                 "component": "VSwitch",
@@ -265,7 +307,7 @@ class EmbyReverseProxyAI(_PluginBase):
                     },
                     {
                         "component": "VCol",
-                        "props": {"cols": 12, "md": 4},
+                        "props": {"cols": 12, "md": 3},
                         "content": [
                             {
                                 "component": "VSwitch",
@@ -273,6 +315,21 @@ class EmbyReverseProxyAI(_PluginBase):
                                     "model": "region_block_enabled",
                                     "label": "地区拦截",
                                     "hint": "开启后按客户端 IP 归属地拦截访问",
+                                    "persistent-hint": True,
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 3},
+                        "content": [
+                            {
+                                "component": "VSwitch",
+                                "props": {
+                                    "model": "client_device_whitelist_enabled",
+                                    "label": "客户端设备白名单",
+                                    "hint": "开启后外网请求必须匹配客户端名和 DeviceId；内网 IP 直接放行",
                                     "persistent-hint": True,
                                 },
                             }
@@ -389,6 +446,28 @@ class EmbyReverseProxyAI(_PluginBase):
                             {
                                 "component": "VTextarea",
                                 "props": {
+                                    "model": "client_device_whitelist_rules",
+                                    "label": "白名单客户端设备",
+                                    "rows": 4,
+                                    "placeholder": "每行一条：客户端名 => DeviceId\n示例：Emby Web => 1234567890abcdef",
+                                    "hint": "开启客户端设备白名单后，外网 API 请求必须同时匹配客户端名和 DeviceId；内网 IP 直接放行。客户端名来自 X-Emby-Authorization 的 Client 字段。",
+                                    "persistent-hint": True,
+                                },
+                            }
+                        ],
+                    },
+                ],
+            },
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12},
+                        "content": [
+                            {
+                                "component": "VTextarea",
+                                "props": {
                                     "model": "pin_rules",
                                     "label": "顶置路径规则",
                                     "rows": 4,
@@ -411,4 +490,6 @@ class EmbyReverseProxyAI(_PluginBase):
             "external_player_list": [],
             "region_block_enabled": False,
             "region_block_rules": "",
+            "client_device_whitelist_enabled": False,
+            "client_device_whitelist_rules": "",
         }
