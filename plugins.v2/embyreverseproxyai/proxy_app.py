@@ -512,6 +512,9 @@ def create_app(
         """
         if not _client_device_whitelist_enabled or not _client_device_whitelist:
             return await call_next(request)
+        path = request.scope.get("path", "")
+        if not _is_client_auth_path(path):
+            return await call_next(request)
         if _should_skip_client_device_whitelist(request):
             return await call_next(request)
 
@@ -620,6 +623,10 @@ def create_app(
         地区拦截中间件：直连 8099 时使用 request.client.host 查询地区并拦截
         """
         if not _region_block_enabled or not _region_block_rules:
+            return await call_next(request)
+
+        path = request.scope.get("path", "")
+        if not _is_client_auth_path(path):
             return await call_next(request)
 
         client_ip = request.client.host if request.client else ""
