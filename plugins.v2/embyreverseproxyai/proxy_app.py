@@ -498,6 +498,13 @@ def create_app(
                 return True
         return False
 
+    def _is_client_auth_path(path: str) -> bool:
+        """
+        判断是否为登录 / 认证类接口；这类接口必须走客户端设备白名单
+        """
+        path = path.lower()
+        return "authenticate" in path or path.endswith("/connect/token")
+
     @app.middleware("http")
     async def client_device_whitelist_middleware(request: Request, call_next):
         """
@@ -516,7 +523,13 @@ def create_app(
         whitelist_key = (client_name.casefold(), device_id.casefold())
         if client_name and device_id and whitelist_key in _client_device_whitelist:
             return await call_next(request)
-        if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+        path = request.scope.get("path", "")
+        if not (
+            client_name
+            or device_id
+            or request.method in ("POST", "PUT", "PATCH", "DELETE")
+            or _is_client_auth_path(path)
+        ):
             return await call_next(request)
 
         logger.warning(
