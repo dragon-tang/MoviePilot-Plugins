@@ -60,9 +60,24 @@ def _parse_region_block_rules(raw: str) -> List[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
+def _strip_client_device_note(value: str) -> str:
+    """
+    去掉白名单 DeviceId 后面的备注文本
+
+    支持两种写法：
+    - 客户端名 => DeviceId # 备注
+    - 客户端名 => DeviceId => 备注
+    """
+    value = (value or "").strip()
+    for marker in ("=>", "#", "＃", "//"):
+        if marker in value:
+            value = value.split(marker, 1)[0].strip()
+    return value
+
+
 def _parse_client_device_whitelist(raw: str) -> List[Tuple[str, str]]:
     """
-    解析客户端设备白名单，每行「客户端名 => DeviceId」
+    解析客户端设备白名单，每行「客户端名 => DeviceId」，DeviceId 后可追加备注
 
     :param raw: 原始白名单文本
     :return: 白名单规则列表
@@ -72,6 +87,8 @@ def _parse_client_device_whitelist(raw: str) -> List[Tuple[str, str]]:
         line = line.strip()
         if not line:
             continue
+        if line.startswith(("#", "＃", "//")):
+            continue
         if "=>" not in line:
             logger.warning(
                 '客户端设备白名单格式错误，已忽略（需用 "=>" 分隔客户端名与 DeviceId）: %s',
@@ -79,6 +96,7 @@ def _parse_client_device_whitelist(raw: str) -> List[Tuple[str, str]]:
             )
             continue
         client_name, device_id = [part.strip() for part in line.split("=>", 1)]
+        device_id = _strip_client_device_note(device_id)
         if not client_name or not device_id:
             logger.warning("客户端设备白名单客户端名或 DeviceId 为空，已忽略: %s", line)
             continue
@@ -96,7 +114,7 @@ class EmbyReverseProxyAI(_PluginBase):
         "Emby 302 反向代理，自动代理 HTTP 链接，跳转最终地址，支持外部播放器调用、地区拦截和客户端设备白名单。"
     )
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/refs/heads/main/icons/Emby_A.png"
-    plugin_version = "0.2.11"
+    plugin_version = "0.2.12"
     plugin_author = "DDSRem"
     author_url = "https://github.com/DDSRem"
     plugin_config_prefix = "embyreverseproxyai_"
@@ -449,8 +467,8 @@ class EmbyReverseProxyAI(_PluginBase):
                                     "model": "client_device_whitelist_rules",
                                     "label": "白名单客户端设备",
                                     "rows": 4,
-                                    "placeholder": "每行一条：客户端名 => DeviceId\n示例：Emby Web => 1234567890abcdef",
-                                    "hint": "开启客户端设备白名单后，外网 API 请求必须同时匹配客户端名和 DeviceId；内网 IP 直接放行。客户端名来自 X-Emby-Authorization 的 Client 字段。",
+                                    "placeholder": "每行一条：客户端名 => DeviceId # 备注\n示例：Emby Web => 1234567890abcdef # 客厅电视",
+                                    "hint": "开启客户端设备白名单后，外网认证请求必须同时匹配客户端名和 DeviceId；DeviceId 后可用 # 或 => 添加备注，备注不参与匹配。",
                                     "persistent-hint": True,
                                 },
                             }

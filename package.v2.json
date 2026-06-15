@@ -27,11 +27,12 @@
     "name": "Emby 302 反向代理AI版",
     "description": "Emby 302 反向代理，自动代理 HTTP 链接，跳转最终地址，支持外部播放器调用、真实客户端 IP 转发、地区拦截和客户端设备白名单。",
     "labels": "云盘,媒体",
-    "version": "0.2.11",
+    "version": "0.2.12",
     "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/refs/heads/main/icons/Emby_A.png",
     "author": "DDSRem",
     "level": 1,
     "history": {
+      "v0.2.12": "增强客户端设备白名单：支持在 DeviceId 后添加备注，备注不参与匹配，便于区分设备。",
       "v0.2.11": "优化性能：白名单和地区拦截只在登录/认证接口生效，普通浏览、图片、播放和 302 相关路径不进入拦截逻辑。",
       "v0.2.10": "修复客户端设备白名单过度放行：有客户端身份的非白名单请求会被拦截，认证接口和写请求仍强制检查；公共资源继续放行以避免误伤 Web 页面。",
       "v0.2.9": "降低客户端设备白名单误伤：公共信息接口、图片资源、Web 静态资源和无身份 GET/HEAD 请求放行；白名单主要拦截带客户端身份或认证类写请求。",
