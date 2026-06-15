@@ -27,7 +27,21 @@ ALL_EXTERNAL_PLAYER_KEYS = list(EXTERNAL_PLAYERS.keys())
 
 EXTERNAL_PLAYER_MARKER = "[EmbyReverseProxy] externalPlayer"
 REDIRECT_PATH = "/redirect2external"
-EMBY_AUTH_TOKEN_RE = re_compile(r'Token="([^"]+)"')
+EMBY_AUTH_TOKEN_RE = re_compile(r'Token\s*=\s*"?([^",\s]+)"?', IGNORECASE)
+
+
+def _query_param_case_insensitive(request: Request, key: str) -> str | None:
+    """
+    从 query 参数中按大小写不敏感方式取值
+    """
+    value = request.query_params.get(key)
+    if value:
+        return value
+    key_lower = key.lower()
+    for name, value in request.query_params.items():
+        if str(name).lower() == key_lower and value:
+            return value
+    return None
 
 
 def extract_api_key(request: Request) -> str | None:
@@ -38,9 +52,9 @@ def extract_api_key(request: Request) -> str | None:
 
     :return str: API Key 或 None
     """
-    api_key = request.query_params.get("api_key") or request.query_params.get(
-        "X-Emby-Token"
-    )
+    api_key = _query_param_case_insensitive(
+        request, "api_key"
+    ) or _query_param_case_insensitive(request, "X-Emby-Token")
     if not api_key:
         api_key = request.headers.get("X-Emby-Token")
     if not api_key:
