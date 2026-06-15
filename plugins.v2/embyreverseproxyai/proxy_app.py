@@ -458,46 +458,6 @@ def create_app(
         ).strip()
         return client_name, device_id
 
-    def _should_skip_client_device_whitelist(request: Request) -> bool:
-        """
-        跳过不携带 Emby 客户端身份的公共接口、图片、静态页面 / 预检请求，避免白名单阻断 Web 壳加载
-        """
-        if request.method == "OPTIONS":
-            return True
-        path = request.scope.get("path", "/").lower()
-        if path in (
-            "/system/info/public",
-            "/emby/system/info/public",
-            "/users/public",
-            "/emby/users/public",
-        ):
-            return True
-        if request.method in ("GET", "HEAD"):
-            if path in ("/", "/web", "/emby/web"):
-                return True
-            if path.startswith(("/web/", "/emby/web/")):
-                return True
-            if "/images/" in path:
-                return True
-            if path.endswith(
-                (
-                    ".js",
-                    ".css",
-                    ".png",
-                    ".jpg",
-                    ".jpeg",
-                    ".webp",
-                    ".svg",
-                    ".ico",
-                    ".woff",
-                    ".woff2",
-                    ".ttf",
-                    ".map",
-                )
-            ):
-                return True
-        return False
-
     def _is_client_auth_path(path: str) -> bool:
         """
         判断是否为登录 / 认证类接口；这类接口必须走客户端设备白名单
@@ -514,8 +474,6 @@ def create_app(
             return await call_next(request)
         path = request.scope.get("path", "")
         if not _is_client_auth_path(path):
-            return await call_next(request)
-        if _should_skip_client_device_whitelist(request):
             return await call_next(request)
 
         client_ip = request.client.host if request.client else ""
