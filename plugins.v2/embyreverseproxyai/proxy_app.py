@@ -460,15 +460,24 @@ def create_app(
 
     def _should_skip_client_device_whitelist(request: Request) -> bool:
         """
-        跳过不携带 Emby 客户端身份的静态页面 / 预检请求，避免白名单阻断 Web 壳加载
+        跳过不携带 Emby 客户端身份的公共接口、图片、静态页面 / 预检请求，避免白名单阻断 Web 壳加载
         """
         if request.method == "OPTIONS":
             return True
         path = request.scope.get("path", "/").lower()
+        if path in (
+            "/system/info/public",
+            "/emby/system/info/public",
+            "/users/public",
+            "/emby/users/public",
+        ):
+            return True
         if request.method in ("GET", "HEAD"):
             if path in ("/", "/web", "/emby/web"):
                 return True
             if path.startswith(("/web/", "/emby/web/")):
+                return True
+            if "/images/" in path:
                 return True
             if path.endswith(
                 (
@@ -506,6 +515,8 @@ def create_app(
         client_name, device_id = _extract_client_device(request)
         whitelist_key = (client_name.casefold(), device_id.casefold())
         if client_name and device_id and whitelist_key in _client_device_whitelist:
+            return await call_next(request)
+        if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
             return await call_next(request)
 
         logger.warning(
