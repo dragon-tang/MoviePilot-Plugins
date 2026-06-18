@@ -72,7 +72,7 @@ class MediaServerMsgAI(_PluginBase):
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "2.1.11"
+    plugin_version = "2.1.12"
     plugin_author = "dragon-tang"
     author_url = "https://github.com/dragon-tang"
     plugin_config_prefix = "mediaservermsgai_"
@@ -193,11 +193,10 @@ class MediaServerMsgAI(_PluginBase):
             template_updates = {}
             if title_templates_raw != title_templates_text:
                 template_updates["title_templates"] = title_templates_text
-            notification_templates_raw = config.get("notification_templates")
-            notification_templates_text = self._normalize_notification_templates_text(notification_templates_raw)
-            self._notification_templates = self._parse_notification_templates(notification_templates_text)
-            if notification_templates_raw != notification_templates_text:
-                template_updates["notification_templates"] = notification_templates_text
+            self._notification_templates = self._collect_notification_templates_from_config(config)
+            notification_field_updates = self._missing_notification_template_field_updates(config)
+            if notification_field_updates:
+                template_updates.update(notification_field_updates)
             if template_updates:
                 self._save_template_defaults(config, template_updates)
             logger.info(f"插件配置初始化完成: 启用={self._enabled}, 聚合={self._aggregate_enabled}({self._aggregate_time}s), "
@@ -266,6 +265,104 @@ class MediaServerMsgAI(_PluginBase):
             logger.error(f"获取媒体服务器列表失败: {str(e)}")
             return []
 
+    @staticmethod
+    def _notification_template_labels() -> OrderedDict:
+        return OrderedDict([
+            ("library_new", "新入库"),
+            ("library_aggregate", "剧集聚合入库"),
+            ("playback_start", "开始播放"),
+            ("playback_stop", "停止播放"),
+            ("playback_pause", "暂停播放"),
+            ("playback_resume", "继续播放"),
+            ("rate", "用户评分/标记"),
+            ("login_success", "登录成功"),
+            ("login_failed", "登录失败"),
+            ("test", "系统测试"),
+            ("deep_delete", "媒体深度删除"),
+            ("audio", "音频事件"),
+            ("audio_library", "音乐入库"),
+        ])
+
+    @classmethod
+    def _notification_template_options(cls) -> list:
+        return [{"title": label, "value": key} for key, label in cls._notification_template_labels().items()]
+
+    @staticmethod
+    def _notification_template_field_name(key: str) -> str:
+        return f"notification_template_{key}"
+
+    @staticmethod
+    def _notification_template_to_text(template: dict) -> str:
+        return json.dumps(template, ensure_ascii=False, indent=2)
+
+    def _default_notification_template_field_values(self) -> Dict[str, str]:
+        defaults = self._build_default_notification_templates(self._title_templates)
+        return {
+            self._notification_template_field_name(key): self._notification_template_to_text(value)
+            for key, value in defaults.items()
+        }
+
+    def _notification_template_textarea_items(self) -> list:
+        defaults = self._build_default_notification_templates(self._title_templates)
+        items = []
+        for key, label in self._notification_template_labels().items():
+            items.append({
+                'component': 'VTextarea',
+                'props': {
+                    'show': f"{{{{notification_template_type == '{key}'}}}}",
+                    'model': self._notification_template_field_name(key),
+                    'label': f'{label}模板（title + text）',
+                    'rows': 10,
+                    'auto-grow': True,
+                    'density': 'compact',
+                    'hide-details': 'auto',
+                    'placeholder': self._notification_template_to_text(defaults[key]),
+                }
+            })
+        return items
+
+    def _parse_single_notification_template(self, raw_template: Any, default_template: dict) -> dict:
+        if not raw_template or not str(raw_template).strip():
+            return dict(default_template)
+        try:
+            data = raw_template if isinstance(raw_template, dict) else json.loads(str(raw_template))
+        except Exception:
+            try:
+                data = ast.literal_eval(str(raw_template))
+            except Exception:
+                return dict(default_template)
+        if isinstance(data, dict) and ("title" in data or "text" in data):
+            title = str(data.get("title", "")).strip()
+            text = str(data.get("text", "")).strip()
+            return {
+                "title": title or default_template["title"],
+                "text": text or default_template["text"],
+            }
+        return dict(default_template)
+
+    def _collect_notification_templates_from_config(self, config: dict) -> OrderedDict:
+        defaults = self._build_default_notification_templates(self._title_templates)
+        field_names = [self._notification_template_field_name(key) for key in defaults]
+        has_split_fields = any(config.get(field) for field in field_names)
+        if has_split_fields:
+            return OrderedDict(
+                (key, self._parse_single_notification_template(config.get(self._notification_template_field_name(key)), default))
+                for key, default in defaults.items()
+            )
+        return self._parse_notification_templates(config.get("notification_templates"))
+
+    def _missing_notification_template_field_updates(self, config: dict) -> Dict[str, str]:
+        defaults = self._build_default_notification_templates(self._title_templates)
+        parsed_templates = self._collect_notification_templates_from_config(config)
+        updates = {}
+        for key, default_template in defaults.items():
+            field = self._notification_template_field_name(key)
+            if not str(config.get(field) or "").strip():
+                updates[field] = self._notification_template_to_text(parsed_templates.get(key) or default_template)
+        if not str(config.get("notification_template_type") or "").strip():
+            updates["notification_template_type"] = "library_new"
+        return updates
+
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         types_options = [
             {"title": "新入库", "value": "library.new"},
@@ -278,6 +375,7 @@ class MediaServerMsgAI(_PluginBase):
             {"title": "系统测试", "value": "system.webhooktest|system.notificationtest"},
             {"title": "媒体深度删除", "value": "deep.delete"},
         ]
+        notification_template_defaults = self._default_notification_template_field_values()
         return [
             {
                 'component': 'VForm',
@@ -350,9 +448,9 @@ class MediaServerMsgAI(_PluginBase):
                                     {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '🎨 通知模板'},
                                     {'component': 'VDivider'},
                                     {'component': 'VCardText', 'content': [
-                                        {'component': 'VAlert', 'props': {'type': 'info', 'variant': 'tonal', 'density': 'compact', 'class': 'mb-3'}, 'text': '完整通知模板，JSON 或 Python 字面量格式；每个类型包含 title/text。支持 {{ title_year }}、{{ current_time }}、{{ season_episode }}、{{ category }}、{{ releaseGroup }}、{{ resource_term }}、{{ audioCodec }}、{{ total_size }}、{{ err_msg }} 等变量，以及 {% if xxx %}...{% endif %} 条件块。清空保存会自动恢复默认模板。'},
-                                        {'component': 'VTextarea', 'props': {'model': 'notification_templates', 'label': '通知模板（标题 + 正文）', 'rows': 14, 'auto-grow': True, 'density': 'compact', 'hide-details': 'auto', 'placeholder': self._default_notification_templates_text()}}
-                                    ]}
+                                        {'component': 'VAlert', 'props': {'type': 'info', 'variant': 'tonal', 'density': 'compact', 'class': 'mb-3'}, 'text': '先在下拉框选择消息类型，再编辑该类型的 title/text 模板；支持 {{ title }}、{{ current_time }}、{{ season_episode }}、{{ category }}、{{ releaseGroup }}、{{ resource_term }}、{{ audioCodec }}、{{ total_size }} 等变量。清空保存会自动恢复默认模板。'},
+                                        {'component': 'VSelect', 'props': {'model': 'notification_template_type', 'label': '选择模板类型', 'items': self._notification_template_options(), 'density': 'compact', 'hide-details': 'auto', 'class': 'mb-3'}}
+                                    ] + self._notification_template_textarea_items()}
                                 ]
                             }
                         ]}
@@ -372,7 +470,8 @@ class MediaServerMsgAI(_PluginBase):
             "overview_max_length": self.DEFAULT_OVERVIEW_MAX_LENGTH,
             "emby_image_host": "",
             "title_templates": self._default_title_templates_text(),
-            "notification_templates": self._default_notification_templates_text()
+            "notification_template_type": "library_new",
+            **notification_template_defaults
         }
 
     def get_page(self) -> List[dict]:
@@ -439,8 +538,8 @@ class MediaServerMsgAI(_PluginBase):
 
         return OrderedDict([
             ("library_new", {
-                "title": title_for("library_new", "🎥 {{ title_year }}"),
-                "text": "{% if current_time %}\n🕒 时间: {{ current_time }}{% endif %}\n🏷 状态: 整理完成{% if season_episode %}\n📺 集数: {{ season_episode }}{% endif %}{% if category %}\n🎬 类别: {{ category }}{% endif %}{% if releaseGroup %}\n👥 小组: {{ releaseGroup }}{% endif %}{% if resource_term %}\n⭐️ 质量: {{ resource_term }}{% endif %}{% if audioCodec %} {{ audioCodec }}{% endif %}{% if total_size %}\n💾 大小: {{ total_size }}{% endif %}{% if overview %}\n📖 简介：\n{{ overview }}{% endif %}{% if err_msg %}\n⚠️ 处理失败: {{ err_msg }}{% endif %}"
+                "title": title_for("library_new", "🆕 {{ title }} 已入库"),
+                "text": "{{ text }}"
             }),
             ("library_aggregate", {
                 "title": title_for("library_aggregate", "🆕 {{ title_year }} 已入库 (含{{ count }}个文件)"),
