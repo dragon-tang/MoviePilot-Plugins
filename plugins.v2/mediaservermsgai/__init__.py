@@ -9,6 +9,7 @@ from typing import Any, List, Dict, Tuple, Optional
 
 import requests
 
+from app.core.config import settings
 from app.core.event import eventmanager, Event
 from app.helper.mediaserver import MediaServerHelper
 from app.log import logger
@@ -43,6 +44,22 @@ class MediaServerMsgAI(_PluginBase):
     MIN_OVERVIEW_MAX_LENGTH = 20
     SERIES_TMDB_CACHE_TTL = 3600
     SERIES_TMDB_NEGATIVE_CACHE_TTL = 300
+    TITLE_TEMPLATE_LIMIT = 120
+    DEFAULT_TITLE_TEMPLATES = OrderedDict([
+        ("library_new", "🆕 {title} 已入库"),
+        ("library_aggregate", "🆕 {title} 已入库 (含{count}个文件)"),
+        ("playback_start", "▶️ 开始播放：{title}"),
+        ("playback_stop", "⏹️ 停止播放：{title}"),
+        ("playback_pause", "⏸️ 暂停播放：{title}"),
+        ("playback_resume", "▶️ 继续播放：{title}"),
+        ("rate", "⭐ 用户评分：{title}"),
+        ("login_success", "✅ 登录成功提醒"),
+        ("login_failed", "🚫 登录失败提醒"),
+        ("test", "🔔 媒体服务器通知测试"),
+        ("deep_delete", "🗑️ 神医助手 - 媒体深度删除"),
+        ("audio", "{title} {action} {server}"),
+        ("audio_library", "🎵 新入库媒体：{title}"),
+    ])
 
     # ==================== 媒体类型常量 ====================
     MT_MOVIE = "MOV"
@@ -54,7 +71,7 @@ class MediaServerMsgAI(_PluginBase):
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "2.1.7"
+    plugin_version = "2.1.8"
     plugin_author = "dragon-tang"
     author_url = "https://github.com/dragon-tang"
     plugin_config_prefix = "mediaservermsgai_"
@@ -118,6 +135,7 @@ class MediaServerMsgAI(_PluginBase):
         self._series_tmdb_inflight = set()
         self._webhook_actions_lower: frozenset = frozenset()
         self._allowed_event_types: frozenset = frozenset()
+        self._title_templates = self.DEFAULT_TITLE_TEMPLATES.copy()
 
     @staticmethod
     def _safe_int(value: Any, default: int, min_value: Optional[int] = None, max_value: Optional[int] = None) -> int:
@@ -167,6 +185,7 @@ class MediaServerMsgAI(_PluginBase):
                 if t
             )
             self._emby_image_host = config.get("emby_image_host", "").rstrip("/")
+            self._title_templates = self._parse_title_templates(config.get("title_templates"))
             logger.info(f"插件配置初始化完成: 启用={self._enabled}, 聚合={self._aggregate_enabled}({self._aggregate_time}s), "
                         f"智能分类={self._smart_category_enabled}, TMDB过滤={self._filter_unrecognized}")
 
@@ -214,7 +233,15 @@ class MediaServerMsgAI(_PluginBase):
         return []
 
     def get_api(self) -> List[Dict[str, Any]]:
-        return []
+        return [
+            {
+                "path": "/test_notification",
+                "endpoint": self.test_notification,
+                "methods": ["GET"],
+                "summary": "发送媒体服务器通知测试消息",
+                "description": "按指定类型发送一条测试通知，用于调试标题模板和消息样式。",
+            }
+        ]
 
     def _get_mediaserver_items(self) -> list:
         """获取媒体服务器列表，带异常保护，避免配置页面白屏"""
@@ -292,13 +319,25 @@ class MediaServerMsgAI(_PluginBase):
                             },
                             # ===== 🖼️ 显示设置 =====
                             {
-                                'component': 'VCard', 'props': {'variant': 'flat'},
+                                'component': 'VCard', 'props': {'variant': 'flat', 'class': 'mb-4'},
                                 'content': [
                                     {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '🖼️ 显示设置'},
                                     {'component': 'VDivider'},
                                     {'component': 'VCardText', 'content': [
                                         {'component': 'VTextField', 'props': {'model': 'overview_max_length', 'label': '简介最大长度', 'placeholder': '150', 'type': 'number', 'hint': '入库通知中简介文字的最大字符数', 'density': 'compact', 'hide-details': 'auto'}},
                                         {'component': 'VTextField', 'props': {'model': 'emby_image_host', 'label': '自定义Emby图片Host', 'placeholder': '例如：http://1.1.1.1:8099', 'hint': '拦截路径的媒体图片将使用此Host构造URL', 'density': 'compact', 'hide-details': 'auto', 'class': 'mt-4'}}
+                                    ]}
+                                ]
+                            },
+                            # ===== 🎨 标题模板 =====
+                            {
+                                'component': 'VCard', 'props': {'variant': 'flat'},
+                                'content': [
+                                    {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '🎨 通知标题模板'},
+                                    {'component': 'VDivider'},
+                                    {'component': 'VCardText', 'content': [
+                                        {'component': 'VAlert', 'props': {'type': 'info', 'variant': 'tonal', 'density': 'compact', 'class': 'mb-3'}, 'text': '每行一个 key=模板；支持 {title}、{user}、{server}、{action}、{time}、{year}、{count}、{ip}、{device}。修改后先保存，再到插件详情页发送测试通知。'},
+                                        {'component': 'VTextarea', 'props': {'model': 'title_templates', 'label': '标题模板', 'rows': 8, 'auto-grow': True, 'density': 'compact', 'hide-details': 'auto', 'placeholder': self._default_title_templates_text()}}
                                     ]}
                                 ]
                             }
@@ -317,12 +356,145 @@ class MediaServerMsgAI(_PluginBase):
             "filter_unrecognized": True,
             "path_skip_keywords": "",
             "overview_max_length": self.DEFAULT_OVERVIEW_MAX_LENGTH,
-            "emby_image_host": ""
+            "emby_image_host": "",
+            "title_templates": self._default_title_templates_text()
         }
 
     def get_page(self) -> List[dict]:
-        return []
+        token = getattr(settings, "API_TOKEN", "")
+        test_kinds = [
+            ("library", "测试入库通知", "primary", "mdi-plus-box"),
+            ("playback", "测试播放通知", "success", "mdi-play-circle"),
+            ("login_success", "测试登录成功", "info", "mdi-login"),
+            ("login_failed", "测试登录失败", "error", "mdi-alert-circle"),
+        ]
+        buttons = [
+            {
+                'component': 'VCol',
+                'props': {'cols': 12, 'sm': 6, 'md': 3},
+                'content': [
+                    {
+                        'component': 'VBtn',
+                        'props': {'block': True, 'color': color, 'variant': 'tonal', 'prepend-icon': icon},
+                        'text': text,
+                        'events': {
+                            'click': {
+                                'api': f'plugin/MediaServerMsgAI/test_notification?kind={kind}&apikey={token}',
+                                'method': 'get'
+                            }
+                        }
+                    }
+                ]
+            }
+            for kind, text, color, icon in test_kinds
+        ]
+        return [
+            {
+                'component': 'VCard',
+                'props': {'variant': 'flat', 'class': 'pa-2'},
+                'content': [
+                    {'component': 'VCardTitle', 'props': {'class': 'd-flex align-center'}, 'text': '🧪 测试通知中心'},
+                    {'component': 'VCardText', 'content': [
+                        {'component': 'VAlert', 'props': {'type': 'info', 'variant': 'tonal', 'density': 'compact', 'class': 'mb-4'}, 'text': '点击下面按钮会立即发送一条测试通知，用来校验标题模板、图片和通知渠道展示效果。'},
+                        {'component': 'VRow', 'content': buttons},
+                        {'component': 'VDivider', 'props': {'class': 'my-4'}},
+                        {'component': 'div', 'props': {'class': 'text-caption text-medium-emphasis'}, 'text': '标题模板在插件配置页维护；留空或格式错误时自动回退默认标题，不影响正常通知。'}
+                    ]}
+                ]
+            }
+        ]
 
+
+    class _SafeTitleDict(dict):
+        def __missing__(self, key):
+            return "{" + key + "}"
+
+    @classmethod
+    def _default_title_templates_text(cls) -> str:
+        return "\n".join(f"{key}={value}" for key, value in cls.DEFAULT_TITLE_TEMPLATES.items())
+
+    def _parse_title_templates(self, raw_templates: Any) -> OrderedDict:
+        templates = self.DEFAULT_TITLE_TEMPLATES.copy()
+        if not raw_templates:
+            return templates
+        if isinstance(raw_templates, dict):
+            items = raw_templates.items()
+        else:
+            items = []
+            for line in str(raw_templates).splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    logger.warning(f"标题模板格式无效，已忽略: {line}")
+                    continue
+                key, value = line.split("=", 1)
+                items.append((key.strip(), value.strip()))
+        for key, value in items:
+            if key in templates and str(value).strip():
+                templates[key] = str(value).strip()
+        return templates
+
+    def _render_title_template(self, key: str, default_template: str, **values) -> str:
+        template = (self._title_templates.get(key) or default_template or "").strip()
+        try:
+            rendered = template.format_map(self._SafeTitleDict({k: "" if v is None else str(v) for k, v in values.items()}))
+        except Exception as e:
+            logger.warning(f"标题模板渲染失败，使用默认标题: {key} - {str(e)}")
+            rendered = default_template.format_map(self._SafeTitleDict({k: "" if v is None else str(v) for k, v in values.items()}))
+        rendered = re.sub(r"\s+", " ", rendered).strip()
+        if len(rendered) > self.TITLE_TEMPLATE_LIMIT:
+            rendered = rendered[:self.TITLE_TEMPLATE_LIMIT].rstrip() + "..."
+        return rendered or default_template or "通知"
+
+    def _get_webhook_image(self, channel: Optional[str]) -> Optional[str]:
+        return self._webhook_images.get(str(channel or "").lower())
+
+    def test_notification(self, kind: str = "library", apikey: str = "", **kwargs) -> Dict[str, Any]:
+        api_token = getattr(settings, "API_TOKEN", "")
+        if not api_token or apikey != api_token:
+            return {"success": False, "message": "API token 无效"}
+        kind = (kind or "library").strip().lower()
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
+        title_name = "示例电影 (2026)"
+        server = "Emby"
+        user = "Dragon"
+        templates = {
+            "library": ("library_new", "🆕 {title} 已入库", "https://raw.githubusercontent.com/dragon-tang/MoviePilot-Plugins/refs/heads/main/icons/emby.png"),
+            "playback": ("playback_start", "▶️ 开始播放：{title}", "https://raw.githubusercontent.com/dragon-tang/MoviePilot-Plugins/refs/heads/main/icons/emby.png"),
+            "login_success": ("login_success", "✅ 登录成功提醒", self._webhook_images.get("emby")),
+            "login_failed": ("login_failed", "🚫 登录失败提醒", self._webhook_images.get("emby")),
+        }
+        if kind not in templates:
+            return {"success": False, "message": f"未知测试类型: {kind}"}
+        template_key, default_template, image = templates[kind]
+        action = "登录失败" if kind == "login_failed" else ("登录成功" if kind == "login_success" else "开始播放")
+        title = self._render_title_template(
+            template_key,
+            default_template,
+            title=title_name,
+            user=user,
+            server=server,
+            action=action,
+            time=now,
+            year="2026",
+            ip="127.0.0.1",
+            device="测试浏览器",
+            count=3,
+        )
+        text = "\n".join([
+            "🧪 这是一条测试通知",
+            f"🎬 媒体：{title_name}",
+            f"👤 用户：{user}",
+            f"🖥️ 服务器：{server}",
+            f"⏰ 时间：{now}",
+        ])
+        try:
+            self._send_notification(title=title, text=text, image=image)
+        except Exception as e:
+            logger.error(f"发送测试通知失败: {str(e)}")
+            return {"success": False, "message": f"发送失败: {str(e)}"}
+        return {"success": True, "message": f"已发送：{title}"}
 
     @staticmethod
     def _short_page_text(value: Any, limit: int = 120, default: str = '-') -> str:
@@ -413,18 +585,19 @@ class MediaServerMsgAI(_PluginBase):
     def _handle_test_event(self, event_info: WebhookEventInfo):
         """处理测试消息"""
         server_name = self._get_server_name_cn(event_info)
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
         texts = [
             f"来自：{server_name}",
-            f"时间：{time.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"时间：{now}",
             f"状态：连接正常"
         ]
         if event_info.user_name:
             texts.append(f"用户：{event_info.user_name}")
 
         self._send_notification(
-            title="🔔 媒体服务器通知测试",
+            title=self._render_title_template("test", "🔔 媒体服务器通知测试", server=server_name, user=event_info.user_name, time=now),
             text="\n".join(texts),
-            image=self._webhook_images.get(event_info.channel)
+            image=self._get_webhook_image(event_info.channel)
         )
 
     def _handle_login_event(self, event_info: WebhookEventInfo):
@@ -444,10 +617,12 @@ class MediaServerMsgAI(_PluginBase):
         texts = [f"👤 用户：{username or '未知用户'}"]
 
         # 设备信息细分
+        device_name = ""
         if event_info.json_object:
             dev = event_info.json_object.get('DeviceInfo', {}) or {}
             if dev.get('Name'):
-                texts.append(f"📱 设备：{dev['Name']}")
+                device_name = dev['Name']
+                texts.append(f"📱 设备：{device_name}")
             client_parts = []
             if dev.get('AppName'):
                 client_parts.append(dev['AppName'])
@@ -474,13 +649,26 @@ class MediaServerMsgAI(_PluginBase):
             except Exception:
                 texts.append(f"🌐 IP：{ip_addr}")
 
-        texts.append(f"🖥️ 服务器：{self._get_server_name_cn(event_info)}")
-        texts.append(f"⏰ 时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
+        server_name = self._get_server_name_cn(event_info)
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
+        texts.append(f"🖥️ 服务器：{server_name}")
+        texts.append(f"⏰ 时间：{now}")
 
+        template_key = "login_failed" if "失败" in action else "login_success"
+        default_title = "🚫 登录失败提醒" if "失败" in action else "✅ 登录成功提醒"
         self._send_notification(
-            title=f"{'🚫' if '失败' in action else '✅'} {action}提醒",
+            title=self._render_title_template(
+                template_key,
+                default_title,
+                user=username or "未知用户",
+                server=server_name,
+                action=action,
+                time=now,
+                ip=ip_addr or "",
+                device=device_name,
+            ),
             text="\n".join(texts),
-            image=self._webhook_images.get(event_info.channel)
+            image=self._get_webhook_image(event_info.channel)
         )
 
     def _handle_rate_event(self, event_info: WebhookEventInfo):
@@ -492,9 +680,10 @@ class MediaServerMsgAI(_PluginBase):
                 logger.info(f"TMDB未识别视频，跳过评分通知: {event_info.item_name}")
                 return
 
+        action = self._webhook_actions.get(event_info.event) or self._webhook_actions.get(event_info.event.lower(), '已标记')
         texts = [
             f"👤 用户：{event_info.user_name or '未知用户'}",
-            f"🏷️ 标记：{self._webhook_actions.get(event_info.event) or self._webhook_actions.get(event_info.event.lower(), '已标记')}",
+            f"🏷️ 标记：{action}",
             f"⏰ 时间：{time.strftime('%Y-%m-%d %H:%M:%S')}"
         ]
 
@@ -506,9 +695,17 @@ class MediaServerMsgAI(_PluginBase):
             image_url = self._get_tmdb_image(event_info, mtype)
 
         self._send_notification(
-            title=f"⭐ 用户评分：{event_info.item_name}",
+            title=self._render_title_template(
+                "rate",
+                "⭐ 用户标记：{title}",
+                title=event_info.item_name,
+                user=event_info.user_name or "未知用户",
+                action=action,
+                server=self._get_server_name_cn(event_info),
+                time=time.strftime('%Y-%m-%d %H:%M:%S'),
+            ),
             text="\n".join(texts),
-            image=image_url or self._webhook_images.get(event_info.channel)
+            image=image_url or self._get_webhook_image(event_info.channel)
         )
 
     def _handle_deep_delete_event(self, event_info: WebhookEventInfo):
@@ -560,7 +757,7 @@ class MediaServerMsgAI(_PluginBase):
                 texts.append(f"… 及其他 {len(mount_paths) - 5} 条路径")
 
         self._send_notification(
-            title="🗑️ 神医助手 - 媒体深度删除",
+            title=self._render_title_template("deep_delete", "🗑️ 神医助手 - 媒体深度删除", title=item_name, time=time.strftime('%Y-%m-%d %H:%M:%S')),
             text="\n" + "\n".join(texts),
             image=None
         )
@@ -608,7 +805,15 @@ class MediaServerMsgAI(_PluginBase):
                 server_name = self._get_server_name_cn(event_info)
                 song_name = (event_info.json_object.get('Item', {}).get('Name')
                              if event_info.json_object else None) or event_info.item_name or '未知媒体'
-                message_title = f"{song_name} {action_base} {server_name}"
+                message_title = self._render_title_template(
+                    "audio",
+                    "{title} {action} {server}",
+                    title=song_name,
+                    action=action_base,
+                    server=server_name,
+                    user=event_info.user_name or "",
+                    time=time.strftime('%Y-%m-%d %H:%M:%S'),
+                )
                 img = self._get_audio_image_url(event_info.server_name, event_info.json_object.get('Item', {}) if event_info.json_object else {})
                 if img:
                     image_url = img
@@ -625,7 +830,13 @@ class MediaServerMsgAI(_PluginBase):
 
                 # 标题构造
                 title_name = self._build_title_name(tmdb_info, event_info)
-                message_title = self._build_message_title(event_info.event, title_name)
+                message_title = self._build_message_title(
+                    event_info.event,
+                    title_name,
+                    user=event_info.user_name or "",
+                    server=self._get_server_name_cn(event_info),
+                    time=time.strftime('%Y-%m-%d %H:%M:%S'),
+                )
 
                 # 内容构造
                 message_texts.append(f"⏰ 时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
@@ -659,7 +870,7 @@ class MediaServerMsgAI(_PluginBase):
             play_link = self._get_play_link(event_info)
 
             if not image_url:
-                image_url = self._webhook_images.get(event_info.channel)
+                image_url = self._get_webhook_image(event_info.channel)
 
             with self._lock:
                 if ev_lower in ("playback.stop", "media.stop", "playbackstop"):
@@ -714,22 +925,23 @@ class MediaServerMsgAI(_PluginBase):
             title_name += f" ({year})"
         return title_name
 
-    def _build_message_title(self, event: str, title_name: str) -> str:
+    def _build_message_title(self, event: str, title_name: str, **values) -> str:
         """根据事件类型构建消息标题"""
         ev = event.lower()
+        context = {"title": title_name, "action": self._webhook_actions.get(event) or self._webhook_actions.get(ev, "通知")}
+        context.update(values)
         if "library.new" in ev:
-            return f"🆕 {title_name} 已入库"
+            return self._render_title_template("library_new", "🆕 {title} 已入库", **context)
         elif "playback.start" in ev or "media.play" in ev or "playbackstart" in ev:
-            return f"▶️ 开始播放：{title_name}"
+            return self._render_title_template("playback_start", "▶️ 开始播放：{title}", **context)
         elif "playback.stop" in ev or "media.stop" in ev or "playbackstop" in ev:
-            return f"⏹️ 停止播放：{title_name}"
+            return self._render_title_template("playback_stop", "⏹️ 停止播放：{title}", **context)
         elif "pause" in ev:
-            return f"⏸️ 暂停播放：{title_name}"
+            return self._render_title_template("playback_pause", "⏸️ 暂停播放：{title}", **context)
         elif "resume" in ev or "unpause" in ev:
-            return f"▶️ 继续播放：{title_name}"
+            return self._render_title_template("playback_resume", "▶️ 继续播放：{title}", **context)
         else:
-            action_base = self._webhook_actions.get(event) or self._webhook_actions.get(ev, "通知")
-            return f"📢 {action_base}：{title_name}"
+            return f"📢 {context['action']}：{title_name}"
 
     def _get_category(self, tmdb_info, event_info: WebhookEventInfo) -> Optional[str]:
         """获取分类（优先智能分类，fallback路径解析）"""
@@ -841,7 +1053,14 @@ class MediaServerMsgAI(_PluginBase):
         if year and str(year) not in title_name:
             title_name += f" ({year})"
 
-        message_title = f"🆕 {title_name} 已入库 (含{count}个文件)"
+        message_title = self._render_title_template(
+            "library_aggregate",
+            "🆕 {title} 已入库 (含{count}个文件)",
+            title=title_name,
+            count=count,
+            server=self._get_server_name_cn(first_info),
+            time=time.strftime('%Y-%m-%d %H:%M:%S'),
+        )
 
         message_texts = [f"⏰ {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"]
 
@@ -866,7 +1085,7 @@ class MediaServerMsgAI(_PluginBase):
         if not image_url and tmdb_id:
             image_url = self._get_tmdb_image(first_info, MediaType.TV)
         if not image_url:
-            image_url = self._webhook_images.get(first_info.channel)
+            image_url = self._get_webhook_image(first_info.channel)
 
         play_link = self._get_play_link(first_info)
 
@@ -1285,7 +1504,14 @@ class MediaServerMsgAI(_PluginBase):
                 link = f"{base_url}/web/index.html#!/item?id={song_id}&serverId={song.get('ServerId', '')}"
 
             self._send_notification(
-                title=f"🎵 新入库媒体：{song_name}",
+                title=self._render_title_template(
+                    "audio_library",
+                    "🎵 新入库媒体：{title}",
+                    title=song_name,
+                    action="已入库",
+                    server=server_name or "媒体服务器",
+                    time=time.strftime('%Y-%m-%d %H:%M:%S'),
+                ),
                 text="\n" + "\n".join(texts),
                 image=image_url,
                 link=link
