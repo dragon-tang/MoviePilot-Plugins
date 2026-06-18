@@ -1,3 +1,4 @@
+import ast
 import json
 import re
 import time
@@ -71,7 +72,7 @@ class MediaServerMsgAI(_PluginBase):
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "2.1.10"
+    plugin_version = "2.1.11"
     plugin_author = "dragon-tang"
     author_url = "https://github.com/dragon-tang"
     plugin_config_prefix = "mediaservermsgai_"
@@ -189,13 +190,16 @@ class MediaServerMsgAI(_PluginBase):
             title_templates_raw = config.get("title_templates")
             title_templates_text = self._normalize_title_templates_text(title_templates_raw)
             self._title_templates = self._parse_title_templates(title_templates_text)
+            template_updates = {}
             if title_templates_raw != title_templates_text:
-                self._save_title_templates_default(config, title_templates_text)
+                template_updates["title_templates"] = title_templates_text
             notification_templates_raw = config.get("notification_templates")
             notification_templates_text = self._normalize_notification_templates_text(notification_templates_raw)
             self._notification_templates = self._parse_notification_templates(notification_templates_text)
             if notification_templates_raw != notification_templates_text:
-                self._save_notification_templates_default(config, notification_templates_text)
+                template_updates["notification_templates"] = notification_templates_text
+            if template_updates:
+                self._save_template_defaults(config, template_updates)
             logger.info(f"插件配置初始化完成: 启用={self._enabled}, 聚合={self._aggregate_enabled}({self._aggregate_time}s), "
                         f"智能分类={self._smart_category_enabled}, TMDB过滤={self._filter_unrecognized}")
 
@@ -346,7 +350,7 @@ class MediaServerMsgAI(_PluginBase):
                                     {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '🎨 通知模板'},
                                     {'component': 'VDivider'},
                                     {'component': 'VCardText', 'content': [
-                                        {'component': 'VAlert', 'props': {'type': 'info', 'variant': 'tonal', 'density': 'compact', 'class': 'mb-3'}, 'text': '完整通知模板，JSON 格式；每个类型包含 title 和 text。支持 {{ title }}、{{ text }}、{{ user }}、{{ server }}，以及 {% if xxx %}...{% endif %} 条件块。清空保存会自动恢复默认模板。'},
+                                        {'component': 'VAlert', 'props': {'type': 'info', 'variant': 'tonal', 'density': 'compact', 'class': 'mb-3'}, 'text': '完整通知模板，JSON 或 Python 字面量格式；每个类型包含 title/text。支持 {{ title_year }}、{{ current_time }}、{{ season_episode }}、{{ category }}、{{ releaseGroup }}、{{ resource_term }}、{{ audioCodec }}、{{ total_size }}、{{ err_msg }} 等变量，以及 {% if xxx %}...{% endif %} 条件块。清空保存会自动恢复默认模板。'},
                                         {'component': 'VTextarea', 'props': {'model': 'notification_templates', 'label': '通知模板（标题 + 正文）', 'rows': 14, 'auto-grow': True, 'density': 'compact', 'hide-details': 'auto', 'placeholder': self._default_notification_templates_text()}}
                                     ]}
                                 ]
@@ -430,10 +434,36 @@ class MediaServerMsgAI(_PluginBase):
 
     @staticmethod
     def _build_default_notification_templates(title_templates: Dict[str, str]) -> OrderedDict:
-        return OrderedDict(
-            (key, {"title": MediaServerMsgAI._title_format_to_mini_template(title), "text": "{{ text }}"})
-            for key, title in title_templates.items()
-        )
+        def title_for(key: str, fallback: str) -> str:
+            return MediaServerMsgAI._title_format_to_mini_template(title_templates.get(key, fallback))
+
+        return OrderedDict([
+            ("library_new", {
+                "title": title_for("library_new", "🎥 {{ title_year }}"),
+                "text": "{% if current_time %}\n🕒 时间: {{ current_time }}{% endif %}\n🏷 状态: 整理完成{% if season_episode %}\n📺 集数: {{ season_episode }}{% endif %}{% if category %}\n🎬 类别: {{ category }}{% endif %}{% if releaseGroup %}\n👥 小组: {{ releaseGroup }}{% endif %}{% if resource_term %}\n⭐️ 质量: {{ resource_term }}{% endif %}{% if audioCodec %} {{ audioCodec }}{% endif %}{% if total_size %}\n💾 大小: {{ total_size }}{% endif %}{% if overview %}\n📖 简介：\n{{ overview }}{% endif %}{% if err_msg %}\n⚠️ 处理失败: {{ err_msg }}{% endif %}"
+            }),
+            ("library_aggregate", {
+                "title": title_for("library_aggregate", "🆕 {{ title_year }} 已入库 (含{{ count }}个文件)"),
+                "text": "{% if current_time %}\n🕒 时间: {{ current_time }}{% endif %}\n🏷 状态: 剧集聚合完成{% if season_episode %}\n📺 集数: {{ season_episode }}{% endif %}{% if category %}\n🎬 类别: {{ category }}{% endif %}{% if count %}\n📦 文件数: {{ count }}{% endif %}{% if overview %}\n📖 简介：\n{{ overview }}{% endif %}"
+            }),
+            ("playback_start", {
+                "title": title_for("playback_start", "▶️ 开始播放：{{ title_year }}"),
+                "text": "{% if current_time %}\n🕒 时间: {{ current_time }}{% endif %}{% if user %}\n👤 用户: {{ user }}{% endif %}{% if device %}\n📱 设备: {{ device }}{% endif %}{% if ip %}\n🌐 IP: {{ ip }}{% endif %}{% if percentage %}\n📊 进度: {{ percentage }}%{% endif %}"
+            }),
+            ("playback_stop", {
+                "title": title_for("playback_stop", "⏹️ 停止播放：{{ title_year }}"),
+                "text": "{% if current_time %}\n🕒 时间: {{ current_time }}{% endif %}{% if user %}\n👤 用户: {{ user }}{% endif %}{% if device %}\n📱 设备: {{ device }}{% endif %}{% if percentage %}\n📊 进度: {{ percentage }}%{% endif %}"
+            }),
+            ("playback_pause", {"title": title_for("playback_pause", "⏸️ 暂停播放：{{ title_year }}"), "text": "{{ text }}"}),
+            ("playback_resume", {"title": title_for("playback_resume", "▶️ 继续播放：{{ title_year }}"), "text": "{{ text }}"}),
+            ("rate", {"title": title_for("rate", "⭐ 用户评分：{{ title_year }}"), "text": "{{ text }}"}),
+            ("login_success", {"title": title_for("login_success", "✅ 登录成功提醒"), "text": "{{ text }}"}),
+            ("login_failed", {"title": title_for("login_failed", "🚫 登录失败提醒"), "text": "{{ text }}"}),
+            ("test", {"title": title_for("test", "🔔 媒体服务器通知测试"), "text": "{{ text }}"}),
+            ("deep_delete", {"title": title_for("deep_delete", "🗑️ 神医助手 - 媒体深度删除"), "text": "{{ text }}"}),
+            ("audio", {"title": title_for("audio", "{{ title }} {{ action }} {{ server }}"), "text": "{{ text }}"}),
+            ("audio_library", {"title": title_for("audio_library", "🎵 新入库媒体：{{ title }}"), "text": "{{ text }}"}),
+        ])
 
     def _default_notification_templates_text(self) -> str:
         return json.dumps(
@@ -449,14 +479,14 @@ class MediaServerMsgAI(_PluginBase):
             return json.dumps(raw_templates, ensure_ascii=False, indent=2)
         return self._default_notification_templates_text()
 
-    def _save_notification_templates_default(self, config: dict, notification_templates_text: str):
+    def _save_template_defaults(self, config: dict, updates: Dict[str, str]):
         try:
             config_to_save = dict(config or {})
-            config_to_save["notification_templates"] = notification_templates_text
+            config_to_save.update(updates)
             self.update_config(config_to_save)
-            logger.info("通知模板为空或缺失，已自动写入默认模板")
+            logger.info(f"模板为空或缺失，已自动写入默认模板: {', '.join(updates.keys())}")
         except Exception as e:
-            logger.warning(f"写入默认通知模板失败: {str(e)}")
+            logger.warning(f"写入默认模板失败: {str(e)}")
 
     def _parse_notification_templates(self, raw_templates: Any) -> OrderedDict:
         templates = self._build_default_notification_templates(self._title_templates)
@@ -464,9 +494,14 @@ class MediaServerMsgAI(_PluginBase):
             return templates
         try:
             data = raw_templates if isinstance(raw_templates, dict) else json.loads(str(raw_templates))
-        except Exception as e:
-            logger.warning(f"通知模板 JSON 解析失败，使用默认模板: {str(e)}")
-            return templates
+        except Exception:
+            try:
+                data = ast.literal_eval(str(raw_templates))
+            except Exception as e:
+                logger.warning(f"通知模板解析失败，使用默认模板: {str(e)}")
+                return templates
+        if isinstance(data, dict) and ("title" in data or "text" in data):
+            data = {"library_new": data}
         if not isinstance(data, dict):
             return templates
         for key, value in data.items():
@@ -498,6 +533,165 @@ class MediaServerMsgAI(_PluginBase):
             pass
         return rendered.strip()
 
+    def _build_template_values(self, event_info: WebhookEventInfo, title_name: str, default_text: str,
+                               tmdb_info=None, **extra) -> Dict[str, Any]:
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
+        json_obj = event_info.json_object if isinstance(getattr(event_info, "json_object", None), dict) else {}
+        item = json_obj.get("Item", {}) if isinstance(json_obj.get("Item", {}), dict) else {}
+        media_source = self._get_media_source(item)
+        streams = self._get_media_streams(item, media_source)
+        video_stream = self._first_media_stream(streams, "Video")
+        audio_stream = self._first_media_stream(streams, "Audio")
+        year = self._first_value(
+            item.get("ProductionYear"),
+            getattr(tmdb_info, "year", None) if tmdb_info else None,
+            self._extract_year_from_title(title_name),
+        )
+        season_episode = extra.get("season_episode") or self._get_season_episode_label(event_info)
+        total_size = self._format_size(self._safe_int(self._first_value(
+            item.get("Size"), media_source.get("Size") if isinstance(media_source, dict) else None
+        ), 0))
+        if total_size == "0 MB":
+            total_size = ""
+        device = getattr(event_info, "device_name", "") or ""
+        client = getattr(event_info, "client", "") or ""
+        if device and client and client not in device:
+            device = f"{client} {device}"
+        values = {
+            "title": title_name,
+            "title_year": title_name,
+            "raw_title": getattr(event_info, "item_name", None) or title_name,
+            "name": getattr(event_info, "item_name", None) or title_name,
+            "year": year or "",
+            "text": default_text,
+            "current_time": now,
+            "time": now,
+            "server": self._get_server_name_cn(event_info),
+            "user": getattr(event_info, "user_name", "") or "",
+            "client": client,
+            "device": device,
+            "ip": getattr(event_info, "ip", "") or "",
+            "percentage": self._format_percentage(getattr(event_info, "percentage", None)),
+            "season_episode": season_episode,
+            "category": extra.get("category", "") or "",
+            "releaseGroup": self._extract_release_group(json_obj, item, getattr(event_info, "item_path", "") or ""),
+            "resource_term": self._build_resource_term(video_stream, media_source, item),
+            "audioCodec": self._build_audio_codec(audio_stream),
+            "videoCodec": str(video_stream.get("Codec") or "").upper() if isinstance(video_stream, dict) else "",
+            "total_size": total_size,
+            "err_msg": self._extract_error_message(json_obj),
+            "overview": getattr(event_info, "overview", "") or (getattr(tmdb_info, "overview", "") if tmdb_info else ""),
+            "tmdbid": getattr(event_info, "tmdb_id", "") or item.get("ProviderIds", {}).get("Tmdb", ""),
+            "imdbid": item.get("ProviderIds", {}).get("Imdb", "") if isinstance(item.get("ProviderIds"), dict) else "",
+            "item_path": getattr(event_info, "item_path", "") or item.get("Path", ""),
+            "container": str(item.get("Container") or media_source.get("Container") or "").upper() if isinstance(media_source, dict) else str(item.get("Container") or "").upper(),
+            "action": extra.get("action", ""),
+            "count": extra.get("count", ""),
+        }
+        values.update({k: v for k, v in extra.items() if v is not None})
+        return values
+
+    @staticmethod
+    def _first_value(*values):
+        for value in values:
+            if value not in (None, ""):
+                return value
+        return ""
+
+    @staticmethod
+    def _extract_year_from_title(title: str) -> str:
+        match = re.search(r"\((\d{4})\)", str(title or ""))
+        return match.group(1) if match else ""
+
+    @staticmethod
+    def _get_media_source(item: dict) -> dict:
+        sources = item.get("MediaSources") if isinstance(item, dict) else None
+        if isinstance(sources, list) and sources:
+            return sources[0] if isinstance(sources[0], dict) else {}
+        return {}
+
+    @staticmethod
+    def _get_media_streams(item: dict, media_source: dict) -> list:
+        streams = item.get("MediaStreams") if isinstance(item, dict) else None
+        if not streams and isinstance(media_source, dict):
+            streams = media_source.get("MediaStreams")
+        return streams if isinstance(streams, list) else []
+
+    @staticmethod
+    def _first_media_stream(streams: list, stream_type: str) -> dict:
+        for stream in streams:
+            if isinstance(stream, dict) and str(stream.get("Type", "")).lower() == stream_type.lower():
+                return stream
+        return {}
+
+    def _get_season_episode_label(self, event_info: WebhookEventInfo) -> str:
+        season = getattr(event_info, "season_id", None)
+        episode = getattr(event_info, "episode_id", None)
+        item = event_info.json_object.get("Item", {}) if isinstance(getattr(event_info, "json_object", None), dict) else {}
+        if season is None:
+            season = item.get("ParentIndexNumber")
+        if episode is None:
+            episode = item.get("IndexNumber")
+        if season is not None and episode is not None:
+            return f"S{str(season).zfill(2)}E{str(episode).zfill(2)}"
+        return ""
+
+    @staticmethod
+    def _format_percentage(value: Any) -> str:
+        if value is None or value == "":
+            return ""
+        try:
+            return str(round(float(value), 2))
+        except Exception:
+            return str(value)
+
+    @staticmethod
+    def _extract_release_group(json_obj: dict, item: dict, path: str) -> str:
+        for source in (json_obj, item):
+            for key in ("ReleaseGroup", "releaseGroup", "release_group", "Group", "ResourceTeam"):
+                if isinstance(source, dict) and source.get(key):
+                    return str(source.get(key))
+        name = os.path.basename(path or "")
+        match = re.search(r"-([A-Za-z0-9]+)(?:\.[^.]+)?$", name)
+        return match.group(1) if match else ""
+
+    @staticmethod
+    def _build_resource_term(video_stream: dict, media_source: dict, item: dict) -> str:
+        parts = []
+        height = video_stream.get("Height") if isinstance(video_stream, dict) else None
+        if height:
+            try:
+                parts.append(f"{int(height)}p")
+            except Exception:
+                parts.append(str(height))
+        video_range = video_stream.get("VideoRange") or video_stream.get("VideoRangeType") if isinstance(video_stream, dict) else ""
+        if video_range:
+            parts.append(str(video_range).upper())
+        container = item.get("Container") or media_source.get("Container") if isinstance(media_source, dict) else item.get("Container")
+        if container:
+            parts.append(str(container).upper())
+        return " ".join(dict.fromkeys(p for p in parts if p))
+
+    @staticmethod
+    def _build_audio_codec(audio_stream: dict) -> str:
+        if not isinstance(audio_stream, dict) or not audio_stream:
+            return ""
+        parts = []
+        if audio_stream.get("Codec"):
+            parts.append(str(audio_stream.get("Codec")).upper())
+        if audio_stream.get("Channels"):
+            parts.append(f"{audio_stream.get('Channels')}ch")
+        if audio_stream.get("Language"):
+            parts.append(str(audio_stream.get("Language")).upper())
+        return " ".join(parts)
+
+    @staticmethod
+    def _extract_error_message(json_obj: dict) -> str:
+        for key in ("err_msg", "ErrMsg", "error", "Error", "message", "Message"):
+            if isinstance(json_obj, dict) and json_obj.get(key):
+                return str(json_obj.get(key))
+        return ""
+
     def _render_notification_template(self, key: str, default_title_template: str, default_text: str, **values) -> Tuple[str, str]:
         values = dict(values)
         values.setdefault("text", default_text)
@@ -522,15 +716,6 @@ class MediaServerMsgAI(_PluginBase):
         if isinstance(raw_templates, str) and raw_templates.strip():
             return raw_templates.strip()
         return cls._default_title_templates_text()
-
-    def _save_title_templates_default(self, config: dict, title_templates_text: str):
-        try:
-            config_to_save = dict(config or {})
-            config_to_save["title_templates"] = title_templates_text
-            self.update_config(config_to_save)
-            logger.info("标题模板为空或缺失，已自动写入默认模板")
-        except Exception as e:
-            logger.warning(f"写入默认标题模板失败: {str(e)}")
 
     def _parse_title_templates(self, raw_templates: Any) -> OrderedDict:
         templates = self.DEFAULT_TITLE_TEMPLATES.copy()
@@ -922,6 +1107,9 @@ class MediaServerMsgAI(_PluginBase):
             title_name = event_info.item_name or "未知媒体"
             action_base = (self._webhook_actions.get(event_info.event)
                            or self._webhook_actions.get(event_info.event.lower(), "通知"))
+            category = ""
+            overview = ""
+            tmdb_info = None
             image_url = self._get_emby_local_image(event_info) if _path_blocked else event_info.image_url
 
             # 音频单曲特殊处理
@@ -1015,11 +1203,15 @@ class MediaServerMsgAI(_PluginBase):
                 text=message_text,
                 image=image_url,
                 link=play_link,
-                title=title_name,
-                user=event_info.user_name or "",
-                server=self._get_server_name_cn(event_info),
-                action=action_base,
-                time=time.strftime('%Y-%m-%d %H:%M:%S'),
+                **self._build_template_values(
+                    event_info,
+                    title_name,
+                    message_text,
+                    tmdb_info=tmdb_info,
+                    category=category,
+                    overview=overview,
+                    action=action_base,
+                ),
             )
 
         except Exception as e:
@@ -1235,16 +1427,24 @@ class MediaServerMsgAI(_PluginBase):
 
         play_link = self._get_play_link(first_info)
 
+        aggregate_text = "\n" + "\n".join(message_texts)
         self._send_templated_notification(
             template_key="library_aggregate",
             default_title_template=message_title,
-            text="\n" + "\n".join(message_texts),
+            text=aggregate_text,
             image=image_url,
             link=play_link,
-            title=title_name,
-            count=count,
-            server=self._get_server_name_cn(first_info),
-            time=time.strftime('%Y-%m-%d %H:%M:%S'),
+            **self._build_template_values(
+                first_info,
+                title_name,
+                aggregate_text,
+                tmdb_info=tmdb_info,
+                category=category,
+                overview=overview,
+                season_episode=episodes_str,
+                count=count,
+                action="已入库",
+            ),
         )
 
     # ==================== 集数合并逻辑 ====================

@@ -3,11 +3,12 @@
     "name": "媒体库服务器通知AI版",
     "description": "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)",
     "labels": "消息通知,媒体库",
-    "version": "2.1.10",
+    "version": "2.1.11",
     "icon": "mediaplay.png",
     "author": "jxxghp",
     "level": 1,
     "history": {
+      "v2.1.11": "增强：通知模板新增 MoviePilot 风格入库变量（title_year/current_time/season_episode/category/releaseGroup/resource_term/audioCodec/total_size/err_msg 等），默认入库模板改为完整信息模板，并兼容 Python 字面量模板写法。",
       "v2.1.10": "修正：将“标题模板”升级为完整“通知模板”，每个消息类型支持 title/text 正文 JSON 模板，并支持 {{变量}} 与 {% if %} 条件块；空模板自动恢复默认。",
       "v2.1.9": "优化：标题模板为空或缺失时自动写入默认模板，避免老配置升级或误清空后配置框空白。",
       "v2.1.8": "新增：通知标题模板自定义，支持多种消息标题 key=模板；新增插件详情页测试通知按钮，可快速发送入库、播放、登录成功/失败测试消息。",
