@@ -771,7 +771,7 @@ class MediaServerMsgAI(_PluginBase):
         """获取剧集系列ID"""
         if event_info.json_object and isinstance(event_info.json_object, dict):
             item = event_info.json_object.get("Item", {})
-            return item.get("SeriesId")
+            return item.get("SeriesId") or getattr(event_info, "series_id", None)
         return getattr(event_info, "series_id", None)
 
     # ==================== 剧集聚合逻辑 ====================
