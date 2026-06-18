@@ -71,7 +71,7 @@ class MediaServerMsgAI(_PluginBase):
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "2.1.9"
+    plugin_version = "2.1.10"
     plugin_author = "dragon-tang"
     author_url = "https://github.com/dragon-tang"
     plugin_config_prefix = "mediaservermsgai_"
@@ -136,6 +136,7 @@ class MediaServerMsgAI(_PluginBase):
         self._webhook_actions_lower: frozenset = frozenset()
         self._allowed_event_types: frozenset = frozenset()
         self._title_templates = self.DEFAULT_TITLE_TEMPLATES.copy()
+        self._notification_templates = self._build_default_notification_templates(self._title_templates)
 
     @staticmethod
     def _safe_int(value: Any, default: int, min_value: Optional[int] = None, max_value: Optional[int] = None) -> int:
@@ -190,6 +191,11 @@ class MediaServerMsgAI(_PluginBase):
             self._title_templates = self._parse_title_templates(title_templates_text)
             if title_templates_raw != title_templates_text:
                 self._save_title_templates_default(config, title_templates_text)
+            notification_templates_raw = config.get("notification_templates")
+            notification_templates_text = self._normalize_notification_templates_text(notification_templates_raw)
+            self._notification_templates = self._parse_notification_templates(notification_templates_text)
+            if notification_templates_raw != notification_templates_text:
+                self._save_notification_templates_default(config, notification_templates_text)
             logger.info(f"插件配置初始化完成: 启用={self._enabled}, 聚合={self._aggregate_enabled}({self._aggregate_time}s), "
                         f"智能分类={self._smart_category_enabled}, TMDB过滤={self._filter_unrecognized}")
 
@@ -333,15 +339,15 @@ class MediaServerMsgAI(_PluginBase):
                                     ]}
                                 ]
                             },
-                            # ===== 🎨 标题模板 =====
+                            # ===== 🎨 通知模板 =====
                             {
                                 'component': 'VCard', 'props': {'variant': 'flat'},
                                 'content': [
-                                    {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '🎨 通知标题模板'},
+                                    {'component': 'VCardTitle', 'props': {'class': 'pa-3'}, 'text': '🎨 通知模板'},
                                     {'component': 'VDivider'},
                                     {'component': 'VCardText', 'content': [
-                                        {'component': 'VAlert', 'props': {'type': 'info', 'variant': 'tonal', 'density': 'compact', 'class': 'mb-3'}, 'text': '每行一个 key=模板；支持 {title}、{user}、{server}、{action}、{time}、{year}、{count}、{ip}、{device}。修改后先保存，再到插件详情页发送测试通知。'},
-                                        {'component': 'VTextarea', 'props': {'model': 'title_templates', 'label': '标题模板', 'rows': 8, 'auto-grow': True, 'density': 'compact', 'hide-details': 'auto', 'placeholder': self._default_title_templates_text()}}
+                                        {'component': 'VAlert', 'props': {'type': 'info', 'variant': 'tonal', 'density': 'compact', 'class': 'mb-3'}, 'text': '完整通知模板，JSON 格式；每个类型包含 title 和 text。支持 {{ title }}、{{ text }}、{{ user }}、{{ server }}，以及 {% if xxx %}...{% endif %} 条件块。清空保存会自动恢复默认模板。'},
+                                        {'component': 'VTextarea', 'props': {'model': 'notification_templates', 'label': '通知模板（标题 + 正文）', 'rows': 14, 'auto-grow': True, 'density': 'compact', 'hide-details': 'auto', 'placeholder': self._default_notification_templates_text()}}
                                     ]}
                                 ]
                             }
@@ -361,7 +367,8 @@ class MediaServerMsgAI(_PluginBase):
             "path_skip_keywords": "",
             "overview_max_length": self.DEFAULT_OVERVIEW_MAX_LENGTH,
             "emby_image_host": "",
-            "title_templates": self._default_title_templates_text()
+            "title_templates": self._default_title_templates_text(),
+            "notification_templates": self._default_notification_templates_text()
         }
 
     def get_page(self) -> List[dict]:
@@ -416,6 +423,96 @@ class MediaServerMsgAI(_PluginBase):
     @classmethod
     def _default_title_templates_text(cls) -> str:
         return "\n".join(f"{key}={value}" for key, value in cls.DEFAULT_TITLE_TEMPLATES.items())
+
+    @staticmethod
+    def _title_format_to_mini_template(title_template: str) -> str:
+        return re.sub(r"{([a-zA-Z_][a-zA-Z0-9_]*)}", r"{{ \1 }}", str(title_template))
+
+    @staticmethod
+    def _build_default_notification_templates(title_templates: Dict[str, str]) -> OrderedDict:
+        return OrderedDict(
+            (key, {"title": MediaServerMsgAI._title_format_to_mini_template(title), "text": "{{ text }}"})
+            for key, title in title_templates.items()
+        )
+
+    def _default_notification_templates_text(self) -> str:
+        return json.dumps(
+            self._build_default_notification_templates(self._title_templates),
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    def _normalize_notification_templates_text(self, raw_templates: Any) -> str:
+        if isinstance(raw_templates, str) and raw_templates.strip():
+            return raw_templates.strip()
+        if isinstance(raw_templates, dict) and raw_templates:
+            return json.dumps(raw_templates, ensure_ascii=False, indent=2)
+        return self._default_notification_templates_text()
+
+    def _save_notification_templates_default(self, config: dict, notification_templates_text: str):
+        try:
+            config_to_save = dict(config or {})
+            config_to_save["notification_templates"] = notification_templates_text
+            self.update_config(config_to_save)
+            logger.info("通知模板为空或缺失，已自动写入默认模板")
+        except Exception as e:
+            logger.warning(f"写入默认通知模板失败: {str(e)}")
+
+    def _parse_notification_templates(self, raw_templates: Any) -> OrderedDict:
+        templates = self._build_default_notification_templates(self._title_templates)
+        if not raw_templates:
+            return templates
+        try:
+            data = raw_templates if isinstance(raw_templates, dict) else json.loads(str(raw_templates))
+        except Exception as e:
+            logger.warning(f"通知模板 JSON 解析失败，使用默认模板: {str(e)}")
+            return templates
+        if not isinstance(data, dict):
+            return templates
+        for key, value in data.items():
+            if key not in templates or not isinstance(value, dict):
+                continue
+            title = str(value.get("title", "")).strip()
+            text = str(value.get("text", "")).strip()
+            if title or text:
+                templates[key] = {
+                    "title": title or templates[key]["title"],
+                    "text": text or templates[key]["text"],
+                }
+        return templates
+
+    @staticmethod
+    def _render_mini_template(template: str, values: Dict[str, Any]) -> str:
+        safe_values = {k: "" if v is None else str(v) for k, v in values.items()}
+
+        def render_if(match):
+            key = match.group(1).strip()
+            body = match.group(2)
+            return body if safe_values.get(key) else ""
+
+        rendered = re.sub(r"{%\s*if\s+([\w_]+)\s*%}(.*?){%\s*endif\s*%}", render_if, template, flags=re.DOTALL)
+        rendered = re.sub(r"{{\s*([\w_]+)\s*}}", lambda m: safe_values.get(m.group(1), ""), rendered)
+        try:
+            rendered = rendered.format_map(MediaServerMsgAI._SafeTitleDict(safe_values))
+        except Exception:
+            pass
+        return rendered.strip()
+
+    def _render_notification_template(self, key: str, default_title_template: str, default_text: str, **values) -> Tuple[str, str]:
+        values = dict(values)
+        values.setdefault("text", default_text)
+        default_title = self._render_title_template(key, default_title_template, **values)
+        template = self._notification_templates.get(key) or {}
+        title_template = template.get("title") or default_title
+        text_template = template.get("text") or "{{ text }}"
+        title = self._render_mini_template(title_template, {**values, "title": values.get("title", "")}) or default_title
+        text = self._render_mini_template(text_template, {**values, "text": default_text}) or default_text
+        return title, text
+
+    def _send_templated_notification(self, template_key: str, default_title_template: str, text: str,
+                                     image: Optional[str] = None, link: Optional[str] = None, **values):
+        title, body = self._render_notification_template(template_key, default_title_template, text, **values)
+        self._send_notification(title=title, text=body, image=image, link=link)
 
     @classmethod
     def _normalize_title_templates_text(cls, raw_templates: Any) -> str:
@@ -491,9 +588,17 @@ class MediaServerMsgAI(_PluginBase):
             return {"success": False, "message": f"未知测试类型: {kind}"}
         template_key, default_template, image = templates[kind]
         action = "登录失败" if kind == "login_failed" else ("登录成功" if kind == "login_success" else "开始播放")
-        title = self._render_title_template(
+        text = "\n".join([
+            "🧪 这是一条测试通知",
+            f"🎬 媒体：{title_name}",
+            f"👤 用户：{user}",
+            f"🖥️ 服务器：{server}",
+            f"⏰ 时间：{now}",
+        ])
+        title, body = self._render_notification_template(
             template_key,
             default_template,
+            text,
             title=title_name,
             user=user,
             server=server,
@@ -504,15 +609,8 @@ class MediaServerMsgAI(_PluginBase):
             device="测试浏览器",
             count=3,
         )
-        text = "\n".join([
-            "🧪 这是一条测试通知",
-            f"🎬 媒体：{title_name}",
-            f"👤 用户：{user}",
-            f"🖥️ 服务器：{server}",
-            f"⏰ 时间：{now}",
-        ])
         try:
-            self._send_notification(title=title, text=text, image=image)
+            self._send_notification(title=title, text=body, image=image)
         except Exception as e:
             logger.error(f"发送测试通知失败: {str(e)}")
             return {"success": False, "message": f"发送失败: {str(e)}"}
@@ -616,10 +714,14 @@ class MediaServerMsgAI(_PluginBase):
         if event_info.user_name:
             texts.append(f"用户：{event_info.user_name}")
 
-        self._send_notification(
-            title=self._render_title_template("test", "🔔 媒体服务器通知测试", server=server_name, user=event_info.user_name, time=now),
+        self._send_templated_notification(
+            template_key="test",
+            default_title_template="🔔 媒体服务器通知测试",
             text="\n".join(texts),
-            image=self._get_webhook_image(event_info.channel)
+            image=self._get_webhook_image(event_info.channel),
+            server=server_name,
+            user=event_info.user_name,
+            time=now,
         )
 
     def _handle_login_event(self, event_info: WebhookEventInfo):
@@ -678,19 +780,17 @@ class MediaServerMsgAI(_PluginBase):
 
         template_key = "login_failed" if "失败" in action else "login_success"
         default_title = "🚫 登录失败提醒" if "失败" in action else "✅ 登录成功提醒"
-        self._send_notification(
-            title=self._render_title_template(
-                template_key,
-                default_title,
-                user=username or "未知用户",
-                server=server_name,
-                action=action,
-                time=now,
-                ip=ip_addr or "",
-                device=device_name,
-            ),
+        self._send_templated_notification(
+            template_key=template_key,
+            default_title_template=default_title,
             text="\n".join(texts),
-            image=self._get_webhook_image(event_info.channel)
+            image=self._get_webhook_image(event_info.channel),
+            user=username or "未知用户",
+            server=server_name,
+            action=action,
+            time=now,
+            ip=ip_addr or "",
+            device=device_name,
         )
 
     def _handle_rate_event(self, event_info: WebhookEventInfo):
@@ -716,18 +816,16 @@ class MediaServerMsgAI(_PluginBase):
             mtype = MediaType.MOVIE if event_info.item_type == self.MT_MOVIE else MediaType.TV
             image_url = self._get_tmdb_image(event_info, mtype)
 
-        self._send_notification(
-            title=self._render_title_template(
-                "rate",
-                "⭐ 用户标记：{title}",
-                title=event_info.item_name,
-                user=event_info.user_name or "未知用户",
-                action=action,
-                server=self._get_server_name_cn(event_info),
-                time=time.strftime('%Y-%m-%d %H:%M:%S'),
-            ),
+        self._send_templated_notification(
+            template_key="rate",
+            default_title_template="⭐ 用户评分：{title}",
             text="\n".join(texts),
-            image=image_url or self._get_webhook_image(event_info.channel)
+            image=image_url or self._get_webhook_image(event_info.channel),
+            title=event_info.item_name,
+            user=event_info.user_name or "未知用户",
+            action=action,
+            server=self._get_server_name_cn(event_info),
+            time=time.strftime('%Y-%m-%d %H:%M:%S'),
         )
 
     def _handle_deep_delete_event(self, event_info: WebhookEventInfo):
@@ -778,10 +876,13 @@ class MediaServerMsgAI(_PluginBase):
             if len(mount_paths) > 5:
                 texts.append(f"… 及其他 {len(mount_paths) - 5} 条路径")
 
-        self._send_notification(
-            title=self._render_title_template("deep_delete", "🗑️ 神医助手 - 媒体深度删除", title=item_name, time=time.strftime('%Y-%m-%d %H:%M:%S')),
+        self._send_templated_notification(
+            template_key="deep_delete",
+            default_title_template="🗑️ 神医助手 - 媒体深度删除",
             text="\n" + "\n".join(texts),
-            image=None
+            image=None,
+            title=item_name,
+            time=time.strftime('%Y-%m-%d %H:%M:%S'),
         )
 
     def _process_media_event(self, event: Event, event_info: WebhookEventInfo):
@@ -817,16 +918,19 @@ class MediaServerMsgAI(_PluginBase):
             event_info.tmdb_id = tmdb_id
             message_texts = []
             message_title = ""
+            template_key = self._get_template_key_for_event(event_info.event)
+            title_name = event_info.item_name or "未知媒体"
+            action_base = (self._webhook_actions.get(event_info.event)
+                           or self._webhook_actions.get(event_info.event.lower(), "通知"))
             image_url = self._get_emby_local_image(event_info) if _path_blocked else event_info.image_url
 
             # 音频单曲特殊处理
             if event_info.item_type == self.MT_AUDIO:
                 self._build_audio_message(event_info, message_texts)
-                action_base = (self._webhook_actions.get(event_info.event)
-                               or self._webhook_actions.get(event_info.event.lower(), "通知"))
                 server_name = self._get_server_name_cn(event_info)
                 song_name = (event_info.json_object.get('Item', {}).get('Name')
                              if event_info.json_object else None) or event_info.item_name or '未知媒体'
+                title_name = song_name
                 message_title = self._render_title_template(
                     "audio",
                     "{title} {action} {server}",
@@ -905,11 +1009,17 @@ class MediaServerMsgAI(_PluginBase):
             if "library.new" in ev_lower:
                 message_text = "\n" + message_text
 
-            self._send_notification(
-                title=message_title,
+            self._send_templated_notification(
+                template_key=template_key,
+                default_title_template=message_title,
                 text=message_text,
                 image=image_url,
-                link=play_link
+                link=play_link,
+                title=title_name,
+                user=event_info.user_name or "",
+                server=self._get_server_name_cn(event_info),
+                action=action_base,
+                time=time.strftime('%Y-%m-%d %H:%M:%S'),
             )
 
         except Exception as e:
@@ -946,6 +1056,20 @@ class MediaServerMsgAI(_PluginBase):
         if year and str(year) not in title_name:
             title_name += f" ({year})"
         return title_name
+
+    def _get_template_key_for_event(self, event: str) -> str:
+        ev = str(event or "").lower()
+        if "library.new" in ev:
+            return "library_new"
+        if "playback.start" in ev or "media.play" in ev or "playbackstart" in ev:
+            return "playback_start"
+        if "playback.stop" in ev or "media.stop" in ev or "playbackstop" in ev:
+            return "playback_stop"
+        if "pause" in ev:
+            return "playback_pause"
+        if "resume" in ev or "unpause" in ev:
+            return "playback_resume"
+        return "audio" if ev else "test"
 
     def _build_message_title(self, event: str, title_name: str, **values) -> str:
         """根据事件类型构建消息标题"""
@@ -1111,11 +1235,16 @@ class MediaServerMsgAI(_PluginBase):
 
         play_link = self._get_play_link(first_info)
 
-        self._send_notification(
-            title=message_title,
+        self._send_templated_notification(
+            template_key="library_aggregate",
+            default_title_template=message_title,
             text="\n" + "\n".join(message_texts),
             image=image_url,
-            link=play_link
+            link=play_link,
+            title=title_name,
+            count=count,
+            server=self._get_server_name_cn(first_info),
+            time=time.strftime('%Y-%m-%d %H:%M:%S'),
         )
 
     # ==================== 集数合并逻辑 ====================
@@ -1525,18 +1654,16 @@ class MediaServerMsgAI(_PluginBase):
             if self._add_play_link:
                 link = f"{base_url}/web/index.html#!/item?id={song_id}&serverId={song.get('ServerId', '')}"
 
-            self._send_notification(
-                title=self._render_title_template(
-                    "audio_library",
-                    "🎵 新入库媒体：{title}",
-                    title=song_name,
-                    action="已入库",
-                    server=server_name or "媒体服务器",
-                    time=time.strftime('%Y-%m-%d %H:%M:%S'),
-                ),
+            self._send_templated_notification(
+                template_key="audio_library",
+                default_title_template="🎵 新入库媒体：{title}",
                 text="\n" + "\n".join(texts),
                 image=image_url,
-                link=link
+                link=link,
+                title=song_name,
+                action="已入库",
+                server=server_name or "媒体服务器",
+                time=time.strftime('%Y-%m-%d %H:%M:%S'),
             )
         except Exception as e:
             logger.error(f"发送单曲通知失败: {str(e)}")
