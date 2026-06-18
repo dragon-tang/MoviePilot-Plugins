@@ -71,7 +71,7 @@ class MediaServerMsgAI(_PluginBase):
     plugin_name = "媒体库服务器通知AI版"
     plugin_desc = "基于Emby识别结果+TMDB元数据+微信清爽版(全消息类型+剧集聚合+未识别过滤)"
     plugin_icon = "mediaplay.png"
-    plugin_version = "2.1.8"
+    plugin_version = "2.1.9"
     plugin_author = "dragon-tang"
     author_url = "https://github.com/dragon-tang"
     plugin_config_prefix = "mediaservermsgai_"
@@ -185,7 +185,11 @@ class MediaServerMsgAI(_PluginBase):
                 if t
             )
             self._emby_image_host = config.get("emby_image_host", "").rstrip("/")
-            self._title_templates = self._parse_title_templates(config.get("title_templates"))
+            title_templates_raw = config.get("title_templates")
+            title_templates_text = self._normalize_title_templates_text(title_templates_raw)
+            self._title_templates = self._parse_title_templates(title_templates_text)
+            if title_templates_raw != title_templates_text:
+                self._save_title_templates_default(config, title_templates_text)
             logger.info(f"插件配置初始化完成: 启用={self._enabled}, 聚合={self._aggregate_enabled}({self._aggregate_time}s), "
                         f"智能分类={self._smart_category_enabled}, TMDB过滤={self._filter_unrecognized}")
 
@@ -412,6 +416,24 @@ class MediaServerMsgAI(_PluginBase):
     @classmethod
     def _default_title_templates_text(cls) -> str:
         return "\n".join(f"{key}={value}" for key, value in cls.DEFAULT_TITLE_TEMPLATES.items())
+
+    @classmethod
+    def _normalize_title_templates_text(cls, raw_templates: Any) -> str:
+        if isinstance(raw_templates, dict) and raw_templates:
+            lines = [f"{key}={value}" for key, value in raw_templates.items() if str(key).strip() and str(value).strip()]
+            return "\n".join(lines) if lines else cls._default_title_templates_text()
+        if isinstance(raw_templates, str) and raw_templates.strip():
+            return raw_templates.strip()
+        return cls._default_title_templates_text()
+
+    def _save_title_templates_default(self, config: dict, title_templates_text: str):
+        try:
+            config_to_save = dict(config or {})
+            config_to_save["title_templates"] = title_templates_text
+            self.update_config(config_to_save)
+            logger.info("标题模板为空或缺失，已自动写入默认模板")
+        except Exception as e:
+            logger.warning(f"写入默认标题模板失败: {str(e)}")
 
     def _parse_title_templates(self, raw_templates: Any) -> OrderedDict:
         templates = self.DEFAULT_TITLE_TEMPLATES.copy()
