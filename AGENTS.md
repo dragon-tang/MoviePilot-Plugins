@@ -1,104 +1,108 @@
 # MoviePilot-Plugins
 
-Dragon 维护的 MoviePilot 插件仓库。
-唯一插件：`MediaServerMsgAI`（媒体库服务器通知AI增强版）。
+Dragon 维护的 MoviePilot 插件仓库。当前只在**本 Telegram 话题**推进本仓库相关工作；旧 302 插件话题只用于 `session_search` 查历史，不再在那里继续提交或讨论，避免冲突。
 
-## 项目结构
+## 当前插件
 
-```
-plugins.v2/mediaservermsgai/
-├── __init__.py        # 主插件源码
-├── requirements.txt   # 依赖
-package.v2.json        # 插件元数据 + 版本历史
+```text
+plugins.v2/mediaservermsgai/      # 媒体库服务器通知AI版
+plugins.v2/embyreverseproxyai/    # Emby 302 反向代理AI版
+package.v2.json                   # 插件市场元数据 + 版本历史
 ```
 
-## 版本管理规则
+## Git / 推送规则
 
-每次代码修改必须同步更新以下两处：
+本地工作目录：
 
-```yaml
-# __init__.py 第55行
-plugin_version = "2.X.X"
-
-# package.v2.json
-version: "2.X.X"
-history:
-  v2.X.X: "对应变更说明"
+```text
+/tmp/MoviePilot-Plugins
 ```
 
-- 版本号按语义递增（大改+1，修复+1）
-- `package.v2.json` 的 `history` 条目用 `OrderedDict` 保持顺序，新版本在最前面
+本仓库使用项目专用 Git token helper：
 
-## 提交规范
-
-```
-type(scope): 中文描述 (vX.X.X)
+```text
+/root/.config/git-credentials-moviepilot
 ```
 
-| 类型 | 使用场景 |
-|------|----------|
-| `feat` | 新功能、UI改动 |
-| `fix` | Bug修复 |
-| `refactor` | 代码重构，无功能变化 |
-| `chore` | 杂项（清理历史、格式化等） |
+不要写入或修改全局 `gh` 登录。若 `git push` 返回 403，优先检查该 PAT 是否对 `dragon-tang/MoviePilot-Plugins` 开启 `Contents: Read and write`。
 
-示例：
-```
-feat(UI): 状态改回纯文本，仪表盘布局紧凑化 (v2.1.4)
-fix(UI): 恢复配置页，仅移除仪表盘 (v2.1.6)
-chore: 精简package.v2.json历史记录，仅保留v2.0.0+版本
-```
-
-## 推送流程
+推送前：
 
 ```bash
-git add -A
-git commit -m "type(scope): 描述 (vX.X.X)"
-git pull --rebase origin main   # 先拉取防冲突
+git status -sb
+python3 -m json.tool package.v2.json >/dev/null
+python3 -m py_compile plugins.v2/mediaservermsgai/__init__.py \
+  plugins.v2/embyreverseproxyai/__init__.py \
+  plugins.v2/embyreverseproxyai/proxy_app.py \
+  plugins.v2/embyreverseproxyai/external_players.py
+git pull --rebase origin main
 git push origin main
 ```
 
-- 遇到冲突时，用 `git pull --rebase` 而非 `git pull`，保持提交历史线性
-- `package.v2.json` 冲突需手动合并 history 对象，保留所有版本的 changelog
+遇到冲突用 `git pull --rebase`，不要 force push，除非用户明确授权。
 
-## 插件开发规则
+## package.v2.json 规则
 
-### 语法检查（强制）
+- 只能**增量合并**插件条目，绝不能用单插件 `package.v2.json` 覆盖仓库原文件。
+- 保留已有插件，例如 `MediaServerMsgAI` 和 `EmbyReverseProxyAI`。
+- 改插件版本时，同步更新：
+  - `plugins.v2/<plugin>/__init__.py` 的 `plugin_version`
+  - `package.v2.json` 对应插件的 `version`
+  - `package.v2.json` 对应插件的 `history`
+- 没有正式 release 流程时，不写 `"release": true`。
 
-修改 `__init__.py` 后、推送前必须执行：
+## MediaServerMsgAI 规则
 
-```bash
-python3 -m py_compile plugins.v2/mediaservermsgai/__init__.py
+### 设计约定
+
+- 路径关键词黑名单 + TMDB 未识别过滤导致通知被吞，是用户特意设计的功能，不要当作误杀修复。
+- 原始 webhook JSON 的 debug 日志是调试用途，保留。
+- `user.authenticated` 登录成功和 `user.authenticationfailed` 登录失败必须是配置表单中两个独立选项，不能合并。
+- 仪表盘已移除：`get_page()` 保持 `return []`，不要重建。
+
+### 配置页
+
+- 使用 Vuetify 组件树。
+- 双栏布局：左栏「基本设置 / 入库设置」，右栏「过滤设置 / 显示设置」。
+- 控件尽量使用 `density='compact'`、`hide-details='auto'`。
+- 修改 `get_form` 时只用小范围 `patch`，不要用大段正则 / 字符串重写，避免括号错配。
+
+### 消息限制
+
+深度删除消息：媒体名称 120 字符，路径 300 字符，挂载路径单条 200 字符，最多显示 5 条。
+
+## EmbyReverseProxyAI 规则
+
+### 稳定基线
+
+- 当前稳定基线：`0.2.12`。
+- `external_players.py` / forward 逻辑保持 DDSRem-Dev 上游原始实现，除非用户明确要求，不要擅改。
+- 原作者代码里无关当前需求的结构不要随意改，例如 `get_command()` / `get_page()` 的 `pass` 保持原样。
+
+### 用户确认过的设计
+
+- 完整 302 真实直链 / token 参数日志是调试用途，保留。
+- `/redirect2external` 解码后直接 302 到任意地址是设计，保留。
+- 真实 IP 只转发给 Emby，不影响 302 直链解析。
+- 地区拦截和客户端 + DeviceId 白名单只作用于登录 / 认证接口，避免影响 302 播放速度。
+- 客户端白名单支持备注，匹配时剥离备注。
+
+### AI 版共存要求
+
+若导入或改造 AI 版插件，需要同步这些标识，避免和上游冲突：
+
+```text
+folder: plugins.v2/embyreverseproxyai
+package key: EmbyReverseProxyAI
+class: EmbyReverseProxyAI
+plugin_config_prefix: embyreverseproxyai_
 ```
 
-### 配置页（get_form）
+显示名可以叫 AI 版，但不要随意改压缩包 / 项目内部路径，除非用户明确要求。
 
-- 使用 Vuetify 组件树 + `types_options` 本地列表
-- 双栏布局：左栏「基本设置」+「入库设置」，右栏「过滤设置」+「显示设置」
-- 所有控件加 `density='compact'`, `hide-details='auto'` 压缩留白
-- 修改时永远用 `patch` 做小范围替换，不要用 `execute_code` 的正则/字符串操作修改 `get_form` 代码——该方法的嵌套字典结构极其复杂，字符串操作极易破坏括号配对
+## 编辑纪律
 
-### 仪表盘（get_page）
-
-- 当前已完全移除（`return []`），勿重建
-- 如需添加简化状态显示，一律用纯文本 `div`，不要用 `VChip` 标签
-
-### 登录事件（user.authenticated / user.authenticationfailed）
-
-- user.authenticated：登录成功
-- user.authenticationfailed：登录失败
-- **这两个必须在配置表单中作为独立选项，不能合并**
-- 通知排版规则：保留标签+设备信息细分+IP提取
-
-### 深度删除消息
-
-媒体名称限制 120 字符，路径限制 300 字符，挂载路径单条 200 字符，最多显示 5 条。
-
-## 历史经验（避免踩坑）
-
-1. **禁止用 `execute_code` 配合 `re.sub` 修改 `get_form` 或 `get_page` 方法**——嵌套字典结构用字符串替换必出括号不匹配问题
-2. **修改后必须先 `py_compile` 再推送**，不可跳过
-3. `patch` 比 `execute_code` 安全得多：一次只改一小块，且每次自动跑 lint 检查
-4. 双栏布局的 VRow/VCol 嵌套层级很深，替换时务必用 `patch` 匹配足够的上下文行确保唯一性
-5. 推送被拒绝时先 `git pull --rebase`，不要 `--force push`（除非用户明确授权）
-6. `package.v2.json` 冲突时必须手动合并 history 对象
+- 小步 patch，每次关键修改后立刻 `py_compile`。
+- 复杂 UI 嵌套结构不要用正则整体替换。
+- 修改远程正在运行的服务脚本时，先备份原文件，再重启服务并检查状态与日志。
+- 不要把用户明确说明“正常 / 设计如此”的行为再次列为 bug。
